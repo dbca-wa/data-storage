@@ -1,0 +1,36 @@
+cronjobs
+
+# Basics
+*.py[cod]
+*.pyc
+__pycache__
+
+# Pycharm
+.idea
+
+# Eclipse
+.project
+.pydevproject
+.settings
+
+# Vim
+*~
+*.swp
+*.swo
+
+
+# logs
+log/
+*.log
+
+# Environment settings
+.env
+
+
+# everything with local in it
+*local/
+
+# Virtualenv dir
+/venv
+
+
