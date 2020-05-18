@@ -1,6 +1,6 @@
 from datetime import datetime as pdatetime
 
-import common_settings as settings
+from data_storage import settings
 
 
 def now():

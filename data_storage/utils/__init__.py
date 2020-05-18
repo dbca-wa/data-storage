@@ -9,10 +9,9 @@ import os
 import subprocess
 import shutil
 import ast
+import dill
 
 from .classproperty import classproperty,cachedclassproperty
-
-from . import timezone
 
 class JSONEncoder(json.JSONEncoder):
     """
@@ -30,6 +29,12 @@ class JSONEncoder(json.JSONEncoder):
                 "_type":"date",
                 "value":obj.strftime("%Y-%m-%d")
             }
+        elif obj.__class__.__name__ == 'function':
+            return {
+                "_type":"functiono",
+                "value":dill.dumps(obj)
+            }
+
         return json.JSONEncoder.default(self,obj)
 
 class JSONDecoder(json.JSONDecoder):
@@ -48,6 +53,8 @@ class JSONDecoder(json.JSONDecoder):
             return timezone.nativetime(datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=TZ))
         elif t == 'date':
             return datetime.strptime(obj["value"],"%Y-%m-%d").date()
+        elif t == 'function':
+            return dill.loads(obj["value"])
         else:
             return obj
 
@@ -120,7 +127,7 @@ def remove_file(f):
 
     try:
         os.remove(f)
-    finally:
+    except:
         pass
 
 def remove_folder(f):
@@ -129,7 +136,7 @@ def remove_folder(f):
 
     try:
         shutil.rmtree(f)
-    finally:
+    except:
         pass
 
 def file_size(f):

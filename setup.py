@@ -14,6 +14,7 @@ setup(
         'python-dotenv==0.10.3',
         'pytz==2019.3',
         'psycopg2==2.8.4',
-        'peewee==3.13.1'
+        'peewee==3.13.1',
+        'dill==0.3.1.1'
     ]
 )
