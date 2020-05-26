@@ -7,6 +7,7 @@ import imp
 import re
 import os
 import subprocess
+import base64
 import shutil
 import ast
 import dill
@@ -31,11 +32,11 @@ class JSONEncoder(json.JSONEncoder):
             }
         elif obj.__class__.__name__ == 'function':
             return {
-                "_type":"functiono",
-                "value":dill.dumps(obj)
+                "_type":"function",
+                "value":base64.b64encode(dill.dumps(obj)).decode()
             }
-
-        return json.JSONEncoder.default(self,obj)
+        else:
+            return json.JSONEncoder.default(self,obj)
 
 class JSONDecoder(json.JSONDecoder):
     """
@@ -54,7 +55,7 @@ class JSONDecoder(json.JSONDecoder):
         elif t == 'date':
             return datetime.strptime(obj["value"],"%Y-%m-%d").date()
         elif t == 'function':
-            return dill.loads(obj["value"])
+            return dill.loads(base64.b64decode(obj["value"]))
         else:
             return obj
 
