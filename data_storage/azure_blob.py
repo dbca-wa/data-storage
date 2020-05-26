@@ -1,4 +1,5 @@
 import json
+import inspect
 import tempfile
 import logging
 import os
@@ -129,8 +130,7 @@ class MetaMetadataMixin(object):
             return
 
         self._meta_metadata_client.update(current_meta_metadata_json)
-        logger.debug("Update the meta metadata({}) to {}".format(self._meta_metadata_client._blob_path,current_meta_metadata_json))
-
+        logger.debug("Update the meta metadata({}) successfully".format(self._meta_metadata_client._blob_path))
 
 class AzureBlobMetadataBase(AzureJsonBlob):
     """
@@ -170,11 +170,14 @@ class AzureBlobMetadataBase(AzureJsonBlob):
             #cache the json data
             self._json = json_data
 
-        return json_data or {}
+        return json_data
 
     def update(self,metadata):
-        if metadata is None:
-            metadata = {}
+        if not metadata:
+            #metadata is empty, delete the metedata
+            self.delete()
+            return
+
         logger.debug("Update the meta file '{}'".format(self._blob_path))
         super().update(metadata)
         if self._cache:
@@ -287,10 +290,11 @@ class AzureBlobIndexedMetadata(AzureBlobMetadataIndex):
         if self.resource_keys[0] not in kwargs:
             #return all resource metadata
             index_json = self.json
-            for metaname,metapath in index_json:
-                meta_client = self.metaclient_class(self._connection_string,self._container_name,resource_base_path=self._resource_base_path,cache=False,metaname=metaname,archive=self._archive)
-                for metadata in meta_client.resource_metadatas(throw_exception=throw_exception):
-                    yield metadata
+            if index_json:
+                for metaname,metapath in index_json:
+                    meta_client = self.metaclient_class(self._connection_string,self._container_name,resource_base_path=self._resource_base_path,cache=False,metaname=metaname,archive=self._archive)
+                    for metadata in meta_client.resource_metadatas(throw_exception=throw_exception):
+                        yield metadata
 
         else:
             self._metaname = self._f_metaname(kwargs[self.resource_keys[0]])
@@ -421,7 +425,7 @@ class AzureBlobResourceMetadataBase(AzureBlobMetadataBase):
         Remove the resource's metadata. 
         Return the metadata of the removed resource; if not found, return None
         """
-        metadata = self.json
+        metadata = self.json or {}
         p_metadata = metadata
         if len(self.resource_keys) != len(args):
             raise Exception("Invalid args({})".format(args))
@@ -821,6 +825,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
     NEW = 1
     UPDATED = 2
     DELETED = 3
+  
 
     def __init__(self,resource_name,connection_string,container_name,clientid,resource_base_path=None):
         super().__init__(resource_name,connection_string,container_name,resource_base_path=resource_base_path)
@@ -888,22 +893,15 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
 
         return consume_status
 
-
-    def consume(self,callback,resource_ids_list=None):
+    def is_behind(self,resource_ids_list=None):
         """
         resource_ids_list: the list of resource id for consuming.
-        Return True if some resource has been consumed; otherwise return False
+        Return True if some resource is changed after last consuming;otherwise return False
         """
         client_consume_status = self.consume_status
         if client_consume_status is None:
             client_consume_status = {}
 
-        resource_status = self.NOT_CHANGED
-        metadata = {
-            "resource_id":self._clientid,
-            "last_consume_host":socket.getfqdn(),
-            "last_consume_pid":os.getpid()
-        }
         resource_keys = self._blob_resource_client._metadata_client.resource_keys
         if resource_ids_list:
             #Consume specified resources in order
@@ -917,13 +915,130 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                 except exceptions.ResourceNotFound as ex:
                     if res_consume_status:
                         #this resource was consuemd before and now it was deleted
+                        logger.debug("Found a deleted resource({},{})".format(resource_ids,res_consume_status["resource_metadata"]["resource_path"]))
+                        return True
+                    else:
+                        #this resource was not conusmed and also it doesn't exist
+                        logger.warning("The resource({}) doesn't exist".format(resource_ids))
+                    continue
+
+                if not res_consume_status:
+                    #new resource
+                    logger.debug("Found a new resource({},{})".format(resource_ids,res_meta["resource_path"]))
+                    return True
+                elif res_meta != res_consume_status["resource_metadata"]:
+                    #resource was changed
+                    logger.debug("Found a updated resource({},{})".format(resource_ids,res_meta["resource_path"]))
+                    return True
+                else:
+                    #reosurce was consumed before
+                    logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
+                    continue
+        else:
+            #find new and updated resources
+            checked_resources = set()
+            for res_meta in self._blob_resource_client.resource_metadatas(throw_exception=False):
+                resource_ids = tuple(res_meta[key] for key in resource_keys)
+                checked_resources.add(resource_ids)
+                res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+                if not res_consume_status:
+                    logger.debug("Found a new resource({},{})".format(resource_ids,res_meta["resource_path"]))
+                    return True
+                elif res_meta != res_consume_status["resource_metadata"]:
+                    #resource was changed
+                    logger.debug("Found a updated resource({},{})".format(resource_ids,res_meta["resource_path"]))
+                    return True
+                else:
+                    #reosurce was consumed before
+                    logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
+                    continue
+    
+            #find deleted resources
+            level = 1
+            for val in client_consume_status.values():
+                if level == len(resource_keys):
+                    resource_ids = tuple(val["resource_metadata"][key] for key in resource_keys)
+                    if resource_ids in checked_resources:
+                        continue
+                    else:
+                        logger.debug("Found a deleted resource({})".format(resource_ids))
+                        return True
+                else:
+                    level += 1
+                    for val2 in val.values():
+                        if level == len(resource_keys):
+                            resource_ids = tuple(val2["resource_metadata"][key] for key in resource_keys)
+                            if resource_ids in checked_resources:
+                                continue
+                            else:
+                                logger.debug("Found a deleted resource({})".format(resource_ids))
+                                return True
+                        else:
+                            level += 1
+                            for val3 in val2.values():
+                                if level == len(resource_keys):
+                                    resource_ids = tuple(val3["resource_metadata"][key] for key in resource_keys)
+                                    if resource_ids in checked_resources:
+                                        continue
+                                    else:
+                                        logger.debug("Found a deleted resource({})".format(resource_ids))
+                                        return True
+                                else:
+                                    raise Exception("Not implemented")
+
+
+    def consume(self,callback,resource_ids_list=None,reconsume=False):
+        """
+        resource_ids_list: the list of resource id for consuming.
+        callback: two mode
+            callback per resource,callback's parameters is : resource_status,res_meta,res_file
+            callback for all resource, callback's parameter is list of [resource_status,res_meta,res_file]
+        Return True if some resource has been consumed; otherwise return False
+        """
+        f_args = inspect.getfullargspec(callback)
+        if len(f_args.args) == 1:
+            callback_per_resource = False
+        elif len(f_args.args) == 3:
+            callback_per_resource = True
+        else:
+            raise Exception("Callback should have one parameter(list of tuple(resource_status,resource_metadata,file_name) to run in batch mode ,or have three parameters (resource_status,resource_metadata,file_name) to run in callback per resource mode")
+
+        client_consume_status = self.consume_status
+        if client_consume_status is None:
+            client_consume_status = {}
+
+        resource_status = self.NOT_CHANGED
+        metadata = {
+            "resource_id":self._clientid,
+            "last_consume_host":socket.getfqdn(),
+            "last_consume_pid":os.getpid()
+        }
+        resource_keys = self._blob_resource_client._metadata_client.resource_keys
+        consumed = False
+        updated_resources = []
+        if resource_ids_list:
+            #Consume specified resources in order
+            for resource_ids in resource_ids_list:
+                try:
+                    if not isinstance(resource_ids,(list,tuple)):
+                        resource_ids = [resource_ids]
+
+                    res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+                    res_meta = self._blob_resource_client.get_resource_metadata(*resource_ids)
+                except exceptions.ResourceNotFound as ex:
+                    if res_consume_status:
+                        #this resource was consuemd before and now it was deleted
                         logger.debug("Consume the deleted resource({},{})".format(resource_ids,res_consume_status["resource_metadata"]["resource_path"]))
-                        callback(self.DELETED,res_consume_status["resource_metadata"],None)
+                        self.remove_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+                        consumed = True
                         metadata["last_consumed_resource"] = resource_ids
                         metadata["last_consumed_resource_status"] = "Deleted"
                         metadata["last_consume_date"] = timezone.now()
-                        self.remove_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                        if callback_per_resource:
+                            callback(self.DELETED,res_consume_status["resource_metadata"],None)
+                            self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                        else:
+                            updated_resources.append((self.DELETED,res_consume_status["resource_metadata"],None))
                     else:
                         #this resource was not conusmed and also it doesn't exist
                         logger.warning("The resource({}) doesn't exist".format(resource_ids))
@@ -938,34 +1053,40 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                         "consume_date":timezone.now()
                     }
                     self.set_resource_consume_status(*resource_ids,res_consume_status = res_consume_status,consume_status=client_consume_status)
+                    logger.debug("Consume the new resource({},{})".format(resource_ids,res_meta["resource_path"]))
                 elif res_meta != res_consume_status["resource_metadata"]:
                     #resource was changed
                     resource_status = self.UPDATED
                     res_consume_status["resource_metadata"] = res_meta
                     res_consume_status["resource_status"] = "Update"
                     res_consume_status["consume_date"] = timezone.now()
+                    logger.debug("Consume the updated resource({},{})".format(resource_ids,res_meta["resource_path"]))
+                elif reconsume:
+                    #resource was not changed
+                    resource_status = self.NOT_CHANGED
+                    res_consume_status["resource_metadata"] = res_meta
+                    res_consume_status["resource_status"] = "Reconsume"
+                    res_consume_status["consume_date"] = timezone.now()
+                    logger.debug("Reconsume the resource({},{})".format(resource_ids,res_meta["resource_path"]))
                 else:
                     #reosurce was consumed before
                     logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
                     continue
     
+                consumed = True
                 res_file = self._blob_resource_client.download_resource(*resource_ids)[1]
-                try:
-                    logger.debug("Consume the {} resource({},{})".format("new" if resource_status == self.NEW else "updated",resource_ids,res_meta["resource_path"]))
-                    if res_file.lower().endswith(".json"):
-                        with open(res_file) as f:
-                            callback(resource_status,res_meta,json.loads(f.read()))
-                    else:
+                metadata["last_consumed_resource"] = resource_ids
+                metadata["last_consumed_resource_status"] = "New" if resource_status == self.NEW else "Updated"
+                metadata["last_consume_date"] = timezone.now()
+                if callback_per_resource:
+                    try:
                         callback(resource_status,res_meta,res_file)
-    
-                    metadata["last_consumed_resource"] = resource_ids
-                    metadata["last_consumed_resource_status"] = "New" if resource_status == self.NEW else "Updated"
-                    metadata["last_consume_date"] = timezone.now()
-                    self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
-                finally:
-                    remove_file(res_file)
+                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                    finally:
+                        remove_file(res_file)
+                else:
+                    updated_resources.append((resource_status,res_meta,res_file))
 
-            
         else:
             #find new and updated resources
             checked_resources = set()
@@ -982,32 +1103,39 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                         "consume_date":timezone.now()
                     }
                     self.set_resource_consume_status(*resource_ids,res_consume_status = res_consume_status,consume_status=client_consume_status)
+                    logger.debug("Consume the new resource({},{})".format(resource_ids,res_meta["resource_path"]))
                 elif res_meta != res_consume_status["resource_metadata"]:
                     #resource was changed
                     resource_status = self.UPDATED
                     res_consume_status["resource_metadata"] = res_meta
                     res_consume_status["resource_status"] = "Update"
                     res_consume_status["consume_date"] = timezone.now()
+                    logger.debug("Consume the updated resource({},{})".format(resource_ids,res_meta["resource_path"]))
+                elif reconsume:
+                    #resource was not changed
+                    resource_status = self.NOT_CHANGED
+                    res_consume_status["resource_metadata"] = res_meta
+                    res_consume_status["resource_status"] = "Reconsume"
+                    res_consume_status["consume_date"] = timezone.now()
+                    logger.debug("Reconsume the resource({},{})".format(resource_ids,res_meta["resource_path"]))
                 else:
                     #reosurce was consumed before
                     logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
                     continue
-    
+                
+                consumed = True
                 res_file = self._blob_resource_client.download_resource(*resource_ids)[1]
-                try:
-                    logger.debug("Consume the {} resource({},{})".format("new" if resource_status == self.NEW else "updated",resource_ids,res_meta["resource_path"]))
-                    if res_file.lower().endswith(".json"):
-                        with open(res_file) as f:
-                            callback(resource_status,res_meta,json.loads(f.read()))
-                    else:
+                metadata["last_consumed_resource"] = resource_ids
+                metadata["last_consumed_resource_status"] = "New" if resource_status == self.NEW else "Updated"
+                metadata["last_consume_date"] = timezone.now()
+                if callback_per_resource:
+                    try:
                         callback(resource_status,res_meta,res_file)
-    
-                    metadata["last_consumed_resource"] = resource_ids
-                    metadata["last_consumed_resource_status"] = "New" if resource_status == self.NEW else "Updated"
-                    metadata["last_consume_date"] = timezone.now()
-                    self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
-                finally:
-                    remove_file(res_file)
+                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                    finally:
+                        remove_file(res_file)
+                else:
+                    updated_resources.append((resource_status,res_meta,res_file))
     
     
             #find deleted resources
@@ -1041,15 +1169,28 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                                 else:
                                     raise Exception("Not implemented")
             if deleted_resources:
+                consumed = True
                 for resource_ids in deleted_resources:
                     res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
                     logger.debug("Consume the deleted resource({},{})".format(resource_ids,res_consume_status["resource_metadata"]["resource_path"]))
-                    callback(self.DELETED,res_consume_status["resource_metadata"],None)
+                    self.remove_resource_consume_status(*resource_ids,consume_status=client_consume_status)
                     metadata["last_consumed_resource"] = resource_ids
                     metadata["last_consumed_resource_status"] = "Deleted"
                     metadata["last_consume_date"] = timezone.now()
-                    self.remove_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-                    self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                    if callback_per_resource:
+                        callback(self.DELETED,res_consume_status["resource_metadata"],None)
+                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                    else:
+                        updated_resources.append((self.DELETED,res_consume_status["resource_metadata"],None))
 
+        if not callback_per_resource and updated_resources:
+            try:
+                callback(updated_resources)
+                self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+            finally:
+                for res_status,res_meta,res_file in updated_resources:
+                    remove_file(res_file)
+                
+        return consumed
 
 
