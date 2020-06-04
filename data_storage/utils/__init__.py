@@ -23,7 +23,8 @@ class JSONEncoder(json.JSONEncoder):
         if isinstance(obj,datetime):
             return {
                 "_type":"datetime",
-                "value":obj.astimezone(tz=TZ).strftime("%Y-%m-%d %H:%M:%S.%f")
+                "value":obj.astimezone(tz=TZ).strftime("%Y-%m-%d %H:%M:%S.%f"),
+                "timezone":TZ.zone()
             }
         elif isinstance(obj,date):
             return {
@@ -51,7 +52,7 @@ class JSONDecoder(json.JSONDecoder):
             return obj
         t = obj['_type']
         if t == 'datetime':
-            return timezone.nativetime(datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=TZ))
+            return timezone.nativetime(datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo= pytz.timzeone(obj["timezone"]) if "timezone" in obj else TZ) )
         elif t == 'date':
             return datetime.strptime(obj["value"],"%Y-%m-%d").date()
         elif t == 'function':
