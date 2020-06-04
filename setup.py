@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='data-storage',
-    version='2.1.0',
+    version='2.2.0',
     packages=find_packages(),
     description='The client library for pushing resource to or fetching resource from storage',
     url='https://github.com/rockychen-dpaw/eventhub-client',
