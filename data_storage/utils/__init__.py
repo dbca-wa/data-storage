@@ -18,13 +18,12 @@ class JSONEncoder(json.JSONEncoder):
     """
     A JSON encoder to support encode datetime
     """
+    TZ = pytz.timezone("Australia/Perth")
     def default(self,obj):
-        from data_storage.settings import TZ
         if isinstance(obj,datetime):
             return {
                 "_type":"datetime",
-                "value":obj.astimezone(tz=TZ).strftime("%Y-%m-%d %H:%M:%S.%f"),
-                "timezone":TZ.zone()
+                "value":obj.astimezone(tz=self.TZ).strftime("%Y-%m-%d %H:%M:%S.%f"),
             }
         elif isinstance(obj,date):
             return {
@@ -43,16 +42,17 @@ class JSONDecoder(json.JSONDecoder):
     """
     A JSON decoder to support decode datetime
     """
+    TZ = pytz.timezone("Australia/Perth")
     def __init__(self, *args, **kwargs):
         json.JSONDecoder.__init__(self, object_hook=self.object_hook, *args, **kwargs)
 
     def object_hook(self, obj):
-        from data_storage.settings import TZ
+        from . import timezone
         if '_type' not in obj:
             return obj
         t = obj['_type']
         if t == 'datetime':
-            return timezone.nativetime(datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo= pytz.timzeone(obj["timezone"]) if "timezone" in obj else TZ) )
+            return timezone.nativetime(datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo= self.TZ ))
         elif t == 'date':
             return datetime.strptime(obj["value"],"%Y-%m-%d").date()
         elif t == 'function':
