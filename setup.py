@@ -11,8 +11,7 @@ setup(
     license='Apache License, Version 2.0',
     zip_safe=False,
     install_requires=[
-        'python-dotenv==0.10.3',
-        'pytz==2019.3',
+        'pytz',
         'azure-storage-blob==12.3.1',
         'dill==0.3.1.1'
     ]
