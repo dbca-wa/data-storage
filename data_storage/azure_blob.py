@@ -909,7 +909,6 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                 try:
                     if not isinstance(resource_ids,(list,tuple)):
                         resource_ids = [resource_ids]
-
                     res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
                     res_meta = self._blob_resource_client.get_resource_metadata(*resource_ids)
                 except exceptions.ResourceNotFound as ex:
@@ -993,7 +992,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
         callback: two mode
             callback per resource,callback's parameters is : resource_status,res_meta,res_file
             callback for all resource, callback's parameter is list of [resource_status,res_meta,res_file]
-        Return True if some resource has been consumed; otherwise return False
+        Return the number of some resources which have been consumed; otherwise return 0
         """
         f_args = inspect.getfullargspec(callback)
         if len(f_args.args) == 1:
@@ -1014,7 +1013,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
             "last_consume_pid":os.getpid()
         }
         resource_keys = self._blob_resource_client._metadata_client.resource_keys
-        consumed = False
+        consumed = 0
         updated_resources = []
         if resource_ids_list:
             #Consume specified resources in order
@@ -1022,7 +1021,6 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                 try:
                     if not isinstance(resource_ids,(list,tuple)):
                         resource_ids = [resource_ids]
-
                     res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
                     res_meta = self._blob_resource_client.get_resource_metadata(*resource_ids)
                 except exceptions.ResourceNotFound as ex:
@@ -1030,7 +1028,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                         #this resource was consuemd before and now it was deleted
                         logger.debug("Consume the deleted resource({},{})".format(resource_ids,res_consume_status["resource_metadata"]["resource_path"]))
                         self.remove_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-                        consumed = True
+                        consumed += 1
                         metadata["last_consumed_resource"] = resource_ids
                         metadata["last_consumed_resource_status"] = "Deleted"
                         metadata["last_consume_date"] = timezone.now()
@@ -1073,7 +1071,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
                     continue
     
-                consumed = True
+                consumed += 1
                 res_file = self._blob_resource_client.download_resource(*resource_ids)[1]
                 metadata["last_consumed_resource"] = resource_ids
                 metadata["last_consumed_resource_status"] = "New" if resource_status == self.NEW else "Updated"
@@ -1123,7 +1121,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
                     continue
                 
-                consumed = True
+                consumed += 1
                 res_file = self._blob_resource_client.download_resource(*resource_ids)[1]
                 metadata["last_consumed_resource"] = resource_ids
                 metadata["last_consumed_resource_status"] = "New" if resource_status == self.NEW else "Updated"
@@ -1169,7 +1167,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                                 else:
                                     raise Exception("Not implemented")
             if deleted_resources:
-                consumed = True
+                consumed += 1
                 for resource_ids in deleted_resources:
                     res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
                     logger.debug("Consume the deleted resource({},{})".format(resource_ids,res_consume_status["resource_metadata"]["resource_path"]))
