@@ -1,6 +1,5 @@
-from datetime import datetime,date
+import datetime
 import hashlib
-import pytz
 import json
 import sys
 import imp
@@ -18,14 +17,14 @@ class JSONEncoder(json.JSONEncoder):
     """
     A JSON encoder to support encode datetime
     """
-    TZ = pytz.timezone("Australia/Perth")
+    TZ = datetime.timezone(datetime.timedelta(hours=8),name="Perth")
     def default(self,obj):
-        if isinstance(obj,datetime):
+        if isinstance(obj,datetime.datetime):
             return {
                 "_type":"datetime",
                 "value":obj.astimezone(tz=self.TZ).strftime("%Y-%m-%d %H:%M:%S.%f"),
             }
-        elif isinstance(obj,date):
+        elif isinstance(obj,datetime.date):
             return {
                 "_type":"date",
                 "value":obj.strftime("%Y-%m-%d")
@@ -42,7 +41,7 @@ class JSONDecoder(json.JSONDecoder):
     """
     A JSON decoder to support decode datetime
     """
-    TZ = pytz.timezone("Australia/Perth")
+    TZ = datetime.timezone(datetime.timedelta(hours=8),name="Perth")
     def __init__(self, *args, **kwargs):
         json.JSONDecoder.__init__(self, object_hook=self.object_hook, *args, **kwargs)
 
@@ -52,9 +51,9 @@ class JSONDecoder(json.JSONDecoder):
             return obj
         t = obj['_type']
         if t == 'datetime':
-            return timezone.nativetime(datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo= self.TZ ))
+            return timezone.nativetime(datetime.datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo= self.TZ ))
         elif t == 'date':
-            return datetime.strptime(obj["value"],"%Y-%m-%d").date()
+            return datetime.datetime.strptime(obj["value"],"%Y-%m-%d").date()
         elif t == 'function':
             return dill.loads(base64.b64decode(obj["value"]))
         else:
