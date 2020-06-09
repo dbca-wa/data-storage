@@ -682,7 +682,7 @@ class AzureBlobResourceBase(object):
     
         logger.debug("Download resource {}".format(metadata["resource_path"]))
         if not filename:
-            with tempfile.NamedTemporaryFile(suffix="_{}".format(metadata["resource_id"]),delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix="_{}".format(os.path.split(metadata["resource_file"])[1]),delete=False) as f:
                 self.get_blob_client(metadata["resource_path"]).download_blob().readinto(f)
                 filename = f.name
         else:
@@ -1140,6 +1140,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
             level = 1
             deleted_resources = []
             for val in client_consume_status.values():
+                level = 1
                 if level == len(resource_keys):
                     resource_ids = tuple(val["resource_metadata"][key] for key in resource_keys)
                     if resource_ids in checked_resources:
