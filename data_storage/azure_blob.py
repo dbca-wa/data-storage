@@ -100,7 +100,7 @@ class AzureJsonBlob(AzureBlob):
         blob_data = {} if blob_data is None else blob_data
         if not isinstance(blob_data,bytes):
             #blob_data is not byte array, convert it to json string and encode it to byte array
-            blob_data = json.dumps(blob_data,cls=JSONEncoder).encode()
+            blob_data = json.dumps(blob_data,cls=JSONEncoder,sort_keys=True,indent=4).encode()
         super().update(blob_data)
 
 class MetaMetadataMixin(object):
@@ -1034,7 +1034,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                         metadata["last_consume_date"] = timezone.now()
                         if callback_per_resource:
                             callback(self.DELETED,res_consume_status["resource_metadata"],None)
-                            self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                            self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=metadata)
                         else:
                             updated_resources.append((self.DELETED,res_consume_status["resource_metadata"],None))
                     else:
@@ -1079,7 +1079,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                 if callback_per_resource:
                     try:
                         callback(resource_status,res_meta,res_file)
-                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=metadata)
                     finally:
                         remove_file(res_file)
                 else:
@@ -1129,7 +1129,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                 if callback_per_resource:
                     try:
                         callback(resource_status,res_meta,res_file)
-                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=metadata)
                     finally:
                         remove_file(res_file)
                 else:
@@ -1178,14 +1178,14 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     metadata["last_consume_date"] = timezone.now()
                     if callback_per_resource:
                         callback(self.DELETED,res_consume_status["resource_metadata"],None)
-                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=metadata)
                     else:
                         updated_resources.append((self.DELETED,res_consume_status["resource_metadata"],None))
 
         if not callback_per_resource and updated_resources:
             try:
                 callback(updated_resources)
-                self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder).encode(),metadata=metadata)
+                self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=metadata)
             finally:
                 for res_status,res_meta,res_file in updated_resources:
                     remove_file(res_file)
