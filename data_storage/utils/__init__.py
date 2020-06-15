@@ -142,3 +142,24 @@ def remove_folder(f):
 
 def file_size(f):
     return os.stat(f).st_size
+
+
+def get_property(dict_obj,prop_name,convert_func=None):
+    """
+    Get property value from dictionary object
+    prop_name: a string for simple property or list for nested property
+    convert_fuc: convert the data . 
+    """
+    if not dict_obj:
+        val = None
+    elif isinstance(prop_name,(list,tuple)):
+        val = dict_obj
+        for name in prop_name:
+            val = val.get(name)
+            if val is None:
+                break
+    else:
+        val = dict_obj.get(prop_name)
+
+    return convert_func(val) if convert_func else val
+
