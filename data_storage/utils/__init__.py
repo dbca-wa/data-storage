@@ -147,16 +147,34 @@ def file_size(f):
 def get_property(dict_obj,prop_name,convert_func=None):
     """
     Get property value from dictionary object
-    prop_name: a string for simple property or list for nested property
+    prop_name: 
+        a string for simple property 
+        tuple for nested property
+        a list of (string or tuple) for alternative property
     convert_fuc: convert the data . 
     """
     if not dict_obj:
         val = None
-    elif isinstance(prop_name,(list,tuple)):
+    elif not prop_name:
+        val = dict_obj
+    elif isinstance(prop_name,tuple):
         val = dict_obj
         for name in prop_name:
-            val = val.get(name)
+            if isinstance(val,(list,tuple)):
+                if isinstance(name,int):
+                    if name < len(val):
+                        val = val[name]
+                else:
+                    raise Exception("Please use integer index({}) to access a list.".format(name))
+            else:
+                val = val.get(name)
             if val is None:
+                break
+    elif isinstance(prop_name,list):
+        val = None
+        for p_name in prop_name:
+            val = get_property(dict_obj,p_name,None)
+            if val is not None:
                 break
     else:
         val = dict_obj.get(prop_name)
