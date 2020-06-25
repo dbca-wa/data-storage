@@ -137,6 +137,10 @@ class AzureBlobMetadataBase(AzureJsonBlob):
     A client to get/create/update a blob resource's metadata
     metadata is a json object.
     """
+    RESOURCE = 1
+    DELETED_RESOURCE = 2
+    ALL_RESOURCE = RESOURCE | DELETED_RESOURCE
+
     deleted_key = "deleted"
     meta_metadata_kwargs = [("metaname","_metaname"),("resource_base_path","_resource_base_path"),("logical_delete","_logical_delete")]
     def __init__(self,connection_string,container_name,resource_base_path=None,cache=False,metaname="metadata",logical_delete=False):
@@ -276,10 +280,10 @@ class AzureBlobIndexedMetadata(AzureBlobMetadataIndex):
             return None
 
 
-    def resource_metadatas(self,throw_exception=True,include_logically_deleted_resource=False,**kwargs):
+    def resource_metadatas(self,throw_exception=True,resource_type=AzureBlobMetadataBase.RESOURCE,**kwargs):
         """
         kwargs should be 'resource_file' or the keys in resource_keys
-        include_logically_deleted_resource: only useful if logical delete is enabled; will return logically deleted resource if True 
+        resource_type: can be RESOURCE or DELETED_RESOURCE or BOTH
         if kwargs['resource_file'] is None, navigate the resource's metadata
         if kwargs['resource_file'] is not None, navigate the pushed resource's metadata
         throw_exception: if True, throw exception if resource not found; otherwise return empty generator
@@ -296,22 +300,22 @@ class AzureBlobIndexedMetadata(AzureBlobMetadataIndex):
             if index_json:
                 for metaname,metapath in index_json:
                     meta_client = self.metaclient_class(self._connection_string,self._container_name,resource_base_path=self._resource_base_path,cache=False,metaname=metaname,archive=self._archive)
-                    for metadata in meta_client.resource_metadatas(throw_exception=throw_exception,include_logically_deleted_resource=include_logically_deleted_resource):
+                    for metadata in meta_client.resource_metadatas(throw_exception=throw_exception,resource_type=resource_type):
                         yield metadata
 
         else:
             self._metaname = self._f_metaname(kwargs[self.resource_keys[0]])
-            for metadata in self.metadata_client.resource_metadatas(throw_exception=throw_exception,include_logically_deleted_resource=include_logically_deleted_resource,**kwargs):
+            for metadata in self.metadata_client.resource_metadatas(throw_exception=throw_exception,resource_type=resource_type,**kwargs):
                 yield metadata
 
-    def get_resource_metadata(self,*args,resource_file="current",include_logically_deleted_resource=False):
+    def get_resource_metadata(self,*args,resource_file="current",resource_type=AzureBlobMetadataBase.RESOURCE):
         """
-        include_logically_deleted_resource: only useful if logical delete is enabled; will return logically deleted resource if True 
+        resource_type: can be RESOURCE or DELETED_RESOURCE or BOTH
         Return resource's metadata or pushed resource's metadata if resource_file is not None; if not exist, throw exception
         """
         self._metaname = self._f_metaname(args[0])
 
-        return self.metadata_client.get_resource_metadata(*args,resource_file=resource_file,include_logically_deleted_resource=include_logically_deleted_resource)
+        return self.metadata_client.get_resource_metadata(*args,resource_file=resource_file,resource_type=resource_type)
 
     def remove_resource(self,*args,permanent_delete=False):
         """
@@ -375,10 +379,10 @@ class AzureBlobResourceMetadataBase(AzureBlobMetadataBase):
         else:
             return metadata
 
-    def resource_metadatas(self,throw_exception=True,include_logically_deleted_resource=False,**kwargs):
+    def resource_metadatas(self,throw_exception=True,resource_type=AzureBlobMetadataBase.RESOURCE,**kwargs):
         """
         Return a generator to navigate the metadata of all pushed individual resources or specified resource; if not exist, return a empty generator
-        include_logically_deleted_resource: only useful if logical delete is enabled; will return logically deleted resource if True 
+        resource_type: can be RESOURCE or DELETED_RESOURCE or BOTH
         if kwargs['resource_file'] is None, navigate the resource's metadata
         if kwargs['resource_file'] is not None, navigate the pushed resource's metadata
         throw_exception: if True, throw exception if resource not found; otherwise return empty generator
@@ -404,39 +408,51 @@ class AzureBlobResourceMetadataBase(AzureBlobMetadataBase):
 
         resource_file = kwargs.get("resource_file")
         if index == len(self.resource_keys):
-            if not self._logical_delete or include_logically_deleted_resource or not metadata.get(self.deleted_key,False):
-                #this resource is not logical deleted.
+            if resource_type == self.ALL_RESOURCE:
+                yield self._get_pushed_resource_metadata(metadata,resource_file)
+            elif resource_type == self.RESOURCE and not metadata.get(self.deleted_key,False):
+                yield self._get_pushed_resource_metadata(metadata,resource_file)
+            elif resource_type == self.DELETED_RESOURCE and metadata.get(self.deleted_key,False):
                 yield self._get_pushed_resource_metadata(metadata,resource_file)
             else:
                 raise exceptions.ResourceNotFound("Resource({}) Not Found".format(".".join(kwargs[k] for k in self.resource_keys[0:index])))
         else:
             for m1 in metadata.values():
                 if (index + 1) == len(self.resource_keys):
-                    if not self._logical_delete or include_logically_deleted_resource or not m1.get(self.deleted_key,False):
-                        #this resource is not logical deleted.
+                    if resource_type == self.ALL_RESOURCE:
+                        yield self._get_pushed_resource_metadata(m1,resource_file)
+                    elif resource_type == self.RESOURCE and not m1.get(self.deleted_key,False):
+                        yield self._get_pushed_resource_metadata(m1,resource_file)
+                    elif resource_type == self.DELETED_RESOURCE and m1.get(self.deleted_key,False):
                         yield self._get_pushed_resource_metadata(m1,resource_file)
                 else:
                     for m2 in m1.values():
                         if (index + 2) == len(self.resource_keys):
-                            if not self._logical_delete or include_logically_deleted_resource or not m2.get(self.deleted_key,False):
-                                #this resource is not logical deleted.
+                            if resource_type == self.ALL_RESOURCE:
+                                yield self._get_pushed_resource_metadata(m2,resource_file)
+                            elif resource_type == self.RESOURCE and not m2.get(self.deleted_key,False):
+                                yield self._get_pushed_resource_metadata(m2,resource_file)
+                            elif resource_type == self.DELETED_RESOURCE and m2.get(self.deleted_key,False):
                                 yield self._get_pushed_resource_metadata(m2,resource_file)
                         else:
                             for m3 in m2.values():
                                 if (index + 3) == len(self.resource_keys):
-                                    if not self._logical_delete or include_logically_deleted_resource or not m3.get(self.deleted_key,False):
-                                        #this resource is not logical deleted.
+                                    if resource_type == self.ALL_RESOURCE:
+                                        yield self._get_pushed_resource_metadata(m3,resource_file)
+                                    elif resource_type == self.RESOURCE and not m3.get(self.deleted_key,False):
+                                        yield self._get_pushed_resource_metadata(m3,resource_file)
+                                    elif resource_type == self.DELETED_RESOURCE and m3.get(self.deleted_key,False):
                                         yield self._get_pushed_resource_metadata(m3,resource_file)
                                 else:
                                     raise Exception("Not implemented")
 
 
-    def get_resource_metadata(self,*args,resource_file="current",include_logically_deleted_resource=False):
+    def get_resource_metadata(self,*args,resource_file="current",resource_type=AzureBlobMetadataBase.RESOURCE):
         """
+        resource_type: can be RESOURCE or DELETED_RESOURCE or BOTH
         Return resource's metadata or pushed resource's metadata if resource_file is not None; if not exist, throw exception
-        include_logically_deleted_resource: only useful if logical delete is enabled; will return logically deleted resource if True 
         """
-        return next(self.resource_metadatas(resource_file=resource_file,include_logically_deleted_resource=include_logically_deleted_resource,**dict(zip(self.resource_keys,args))))
+        return next(self.resource_metadatas(resource_file=resource_file,resource_type=resource_type,**dict(zip(self.resource_keys,args))))
 
     def remove_resource(self,*args,permanent_delete=False):
         """
@@ -620,17 +636,17 @@ class AzureBlobResourceBase(object):
             return "{0}/deleted/{1}".format(self._resource_data_path,metadata["resource_file"])
 
 
-    def resource_metadatas(self,throw_exception=True,include_logically_deleted_resource=False,**kwargs):
-        for m in self._metadata_client.resource_metadatas(throw_exception=throw_exception,include_logically_deleted_resource=include_logically_deleted_resource,**kwargs):
+    def resource_metadatas(self,throw_exception=True,resource_type=AzureBlobMetadataBase.RESOURCE,**kwargs):
+        for m in self._metadata_client.resource_metadatas(throw_exception=throw_exception,resource_type=resource_type,**kwargs):
             yield m
 
-    def get_resource_metadata(self,*args,resource_file="current",include_logically_deleted_resource=False):
+    def get_resource_metadata(self,*args,resource_file="current",resource_type=AzureBlobMetadataBase.RESOURCE):
         """
         if resurce_file is "current", it means the latest archive of the specific resource; otherwise, it should be a resource's resource file ; only meaningful for archived resource
         throw exception if not found
         Return the resource's metadata
         """
-        return self._metadata_client.get_resource_metadata(*args,resource_file=resource_file,include_logically_deleted_resource=include_logically_deleted_resource)
+        return self._metadata_client.get_resource_metadata(*args,resource_file=resource_file,resource_type=resource_type)
 
 
     def delete_resource(self,permanent_delete=False,**kwargs):
@@ -643,7 +659,7 @@ class AzureBlobResourceBase(object):
         if unknown_args:
             raise Exception("Unsupported keywords arguments({})".format(unknown_args))
 
-        metadatas = [ m for m in self._metadata_client.resource_metadatas(resource_file=None,include_logically_deleted_resource=permanent_delete,**kwargs)]
+        metadatas = [ m for m in self._metadata_client.resource_metadatas(resource_file=None,resource_type=AzureBlobResourceMetadataBase.ALL_RESOURCE if permanent_delete else AzureBlobMetadataBase.RESOURCE,**kwargs)]
         for m in metadatas:
             self._delete_resource(m,permanent_delete=permanent_delete)
 
@@ -687,8 +703,17 @@ class AzureBlobResourceBase(object):
         #remove the resource from metadata
         self._metadata_client.remove_resource(*[metadata[k] for k in self._metadata_client.resource_keys],permanent_delete=permanent_delete)
         
+    def purge(self):
+        """
+        Delete all logically deleted resource from blob storage
+        """
+        metadatas = [ m for m in self._metadata_client.resource_metadatas(resource_file=None,resource_type=AzureBlobResourceMetadataBase.DELETED_RESOURCE)]
+        for m in metadatas:
+            self._delete_resource(m,permanent_delete=True)
 
-    def download_resources(self,folder=None,overwrite=False,include_logically_deleted_resource=False,**kwargs):
+        return metadatas
+
+    def download_resources(self,folder=None,overwrite=False,resource_type=AzureBlobMetadataBase.RESOURCE,**kwargs):
         """
         Only available for group resource
         """
@@ -713,7 +738,7 @@ class AzureBlobResourceBase(object):
         if self._archive:
             kwargs["resource_file"] = "current"
 
-        metadatas = [m for m in self._metadata_client.resource_metadatas(throw_exception=True,include_logically_deleted_resource=include_logically_deleted_resource,**kwargs)]
+        metadatas = [m for m in self._metadata_client.resource_metadatas(throw_exception=True,resource_type=resource_type,**kwargs)]
         for metadata in metadatas:
             if metadata.get("resource_file") and metadata.get("resource_path"):
                 logger.debug("Download resource {}".format(metadata["resource_path"]))
@@ -724,13 +749,15 @@ class AzureBlobResourceBase(object):
                         raise Exception("The path({}) is not a file.".format(filename))
                     elif not overwrite:
                         raise Exception("The file({}) already exists".format(filename))
+                elif not os.path.exists(os.path.dirname(filename)):
+                    os.makedirs(os.path.dirname(filename))
 
                 with open(filename,'wb') as f:
                     self.get_blob_client(metadata["resource_path"]).download_blob().readinto(f)
 
         return (metadatas,folder)
 
-    def download_resource(self,*args,filename=None,overwrite=False,include_logically_deleted_resource=False):
+    def download_resource(self,*args,filename=None,overwrite=False,resource_type=AzureBlobMetadataBase.RESOURCE):
         """
         Download the resource with resourceid, and return the filename 
         remove the existing file or folder if overwrite is True
@@ -744,7 +771,7 @@ class AzureBlobResourceBase(object):
                     #already exist and can't overwrite
                     raise Exception("The file({}) already exists".format(filename))
         
-        metadata = self.get_resource_metadata(*args,resource_file="current",include_logically_deleted_resource=include_logically_deleted_resource)
+        metadata = self.get_resource_metadata(*args,resource_file="current",resource_type=resource_type)
 
         return self._download_resource(metadata,filename=filename,overwrite=overwrite)
 
@@ -988,7 +1015,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     if not isinstance(resource_ids,(list,tuple)):
                         resource_ids = [resource_ids]
                     res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-                    res_meta = self._blob_resource_client.get_resource_metadata(*resource_ids,include_logically_deleted_resource=True)
+                    res_meta = self._blob_resource_client.get_resource_metadata(*resource_ids,resource_type=AzureBlobResourceMetadataBase.ALL_RESOURCE)
                 except exceptions.ResourceNotFound as ex:
                     if res_consume_status:
                         #this resource was consuemd before and now it was deleted
@@ -1018,7 +1045,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
         else:
             #find new and updated resources
             checked_resources = set()
-            for res_meta in self._blob_resource_client.resource_metadatas(throw_exception=False,include_logically_deleted_resource=True):
+            for res_meta in self._blob_resource_client.resource_metadatas(throw_exception=False,resource_type=AzureBlobResourceMetadataBase.ALL_RESOURCE):
                 resource_ids = tuple(res_meta[key] for key in resource_keys)
                 if resources and not resources(*resource_ids):
                     continue
@@ -1158,7 +1185,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
             res_file = None
             try:
                 if res_meta:
-                    res_file = self._blob_resource_client.download_resource(*resource_ids,include_logically_deleted_resource=True)[1]
+                    res_file = self._blob_resource_client.download_resource(*resource_ids,resource_type=AzureBlobResourceMetadataBase.ALL_RESOURCE)[1]
             
                 callback(resource_status,res_meta or res_consume_status["resource_metadata"],res_file)
                 _update_client_consume_status(resource_status,resource_ids,res_consume_status,res_meta)
@@ -1180,7 +1207,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     if not isinstance(resource_ids,(list,tuple)):
                         resource_ids = [resource_ids]
                     res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-                    res_meta = self._blob_resource_client.get_resource_metadata(*resource_ids,include_logically_deleted_resource=True)
+                    res_meta = self._blob_resource_client.get_resource_metadata(*resource_ids,resource_type=AzureBlobResourceMetadataBase.ALL_RESOURCE)
                 except exceptions.ResourceNotFound as ex:
                     if res_consume_status:
                         #this resource was consuemd before and now it was deleted
@@ -1218,7 +1245,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
         else:
             #find new and updated resources
             checked_resources = set()
-            for res_meta in self._blob_resource_client.resource_metadatas(throw_exception=False,include_logically_deleted_resource=True):
+            for res_meta in self._blob_resource_client.resource_metadatas(throw_exception=False,resource_type=AzureBlobResourceMetadataBase.ALL_RESOURCE):
                 resource_ids = tuple(res_meta[key] for key in resource_keys)
                 if resources and not resources(*resource_ids):
                     continue
@@ -1305,7 +1332,7 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     for updated_resource in updated_resources:
                         consume_result[0].append("Succeed to consume the {} resource({})".format(_get_resource_status_name(updated_resource[0]),updated_resource[1]))
                         if res_meta:
-                            res_file = self._blob_resource_client.download_resource(*updated_resource[1],include_logically_deleted_resource=True)[1]
+                            res_file = self._blob_resource_client.download_resource(*updated_resource[1],resource_type=AzureBlobResourceMetadataBase.ALL_RESOURCE)[1]
                         else:
                             res_file = None
                         callback_arguments.append((updated_resource[0],updated_resource[3] or updated_resource[2]["resource_metadata"],res_file))
