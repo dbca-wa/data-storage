@@ -143,41 +143,83 @@ def remove_folder(f):
 def file_size(f):
     return os.stat(f).st_size
 
+def _get_simple_property(obj,prop_name):
+    if isinstance(obj,(list,tuple)):
+        try:
+            prop_name = int(prop_name)
+            if prop_name < len(obj):
+                return obj[prop_name]
+        except:
+            raise Exception("Please use integer index({}) to access a list.".format(prop_name))
+    elif isinstance(obj,dict):
+        return obj.get(prop_name)
+    elif hasattr(obj,prop_name):
+        return getattr(obj,prop_name)
+    else:
+        return None
 
-def get_property(dict_obj,prop_name,convert_func=None):
+
+def get_property(obj,prop_name,convert_func=None,default=None,multi_properties=False):
     """
-    Get property value from dictionary object
+    Get property value from object(dict object or normal object)
     prop_name: 
         a string for simple property 
-        tuple for nested property
-        a list of (string or tuple) for alternative property
+        tuple or "." separated string for nested property
+        a list of (string or tuple or "." separated string) for alternative property
+    multi_properties:only meaningful if prop_name is a list of properties;
+        find the first non-None property if it is False;
+        find the value of all the properties if it is True
     convert_fuc: convert the data . 
+       it takes the property value as the only argument, if prop_name is a single property or is a list of properties but multi_properties is False
+       it takes the list of values of the properties if prop_name is the list of properties and multi_properties if True
+    Return 
+        if value is None, return default value
+        If convert_func is not None, return te result of the convert_func
+        otherwise:
+            return the value , if prop_name is a single property or is a list of properties but multi_properties is False
+            return the list of value , if prop_name is a list of properties but multi_properties is True
     """
-    if not dict_obj:
+    if not obj:
         val = None
+        multi_properties = False
     elif not prop_name:
-        val = dict_obj
+        val = obj
+        multi_properties = False
     elif isinstance(prop_name,tuple):
-        val = dict_obj
+        val = obj
         for name in prop_name:
-            if isinstance(val,(list,tuple)):
-                if isinstance(name,int):
-                    if name < len(val):
-                        val = val[name]
-                else:
-                    raise Exception("Please use integer index({}) to access a list.".format(name))
-            else:
-                val = val.get(name)
+            val = _get_simple_property(val,name)
             if val is None:
                 break
+        multi_properties = False
     elif isinstance(prop_name,list):
-        val = None
-        for p_name in prop_name:
-            val = get_property(dict_obj,p_name,None)
-            if val is not None:
-                break
+        if len(prop_name) == 1:
+            return get_property(obj,prop_name[0],convert_func=convert_func)
+        else:
+            if multi_properties:
+                val = []
+                for p_name in prop_name:
+                    val.append(get_property(obj,p_name))
+            else:
+                val = None
+                for p_name in prop_name:
+                    val = get_property(obj,p_name)
+                    if val is not None:
+                        break
+    elif "." in prop_name:
+        return get_property(obj,tuple(prop_name.split(".")),convert_func=convert_func)
     else:
-        val = dict_obj.get(prop_name)
+        val = _get_simple_property(obj,prop_name)
+        multi_properties = False
 
-    return convert_func(val) if convert_func else val
+    if val is None:
+        return default
+    else:
+        if callable(val):
+            val = val()
+
+        if multi_properties:
+            return convert_func(*val) if convert_func else val
+        else:
+            return convert_func(val) if convert_func else val
 
