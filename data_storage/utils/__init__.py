@@ -213,7 +213,10 @@ def get_property(obj,prop_name,convert_func=None,default=None,multi_properties=F
         multi_properties = False
 
     if val is None:
-        return default
+        if default is None:
+            return convert_func(None) if convert_func else None
+        else:
+            return default 
     else:
         if callable(val):
             val = val()
