@@ -1224,6 +1224,8 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     #new resource
                     if not self._blob_resource_client.logical_delete or not res_meta.get("deleted",False):
                         resource_status = self.NEW
+                    else:
+                        continue
                 elif self._blob_resource_client.logical_delete and res_meta.get("deleted",False):
                     resource_status = self.DELETED
                 elif res_meta != res_consume_status["resource_metadata"]:
@@ -1255,6 +1257,8 @@ class AzureBlobResourceClient(AzureBlobResourceClients):
                     if not self._blob_resource_client.logical_delete or not res_meta.get("deleted",False):
                         #new resource
                         resource_status = self.NEW
+                    else:
+                        continue
                 elif self._blob_resource_client.logical_delete and res_meta.get("deleted",False):
                     resource_status = self.DELETED
                 elif res_meta != res_consume_status["resource_metadata"]:
