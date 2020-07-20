@@ -1,0 +1,5 @@
+#!/bin/bash
+
+cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.unittests.azure_repository_tester.TestResourceRepository data_storage.unittests.localstorage_repository_tester data_storage.unittests.localstorage_repositoryclient_tester; deactivate
+
+#cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.unittests.localstorage_repository_tester.TestResourceRepository ; deactivate
