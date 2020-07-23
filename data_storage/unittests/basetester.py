@@ -3,6 +3,7 @@ import json
 import os
 import time
 import logging
+from collections import OrderedDict
 
 from data_storage import get_resource_repository,ResourceConstant,ResourceConsumeClient,ResourceConsumeClients
 from data_storage.utils import timezone,JSONEncoder,remove_file,remove_folder
@@ -54,6 +55,8 @@ class BaseTesterMixin(object):
         logger.debug("Clean all resources from the resource repository")
         try:
             get_resource_repository(self.storage,self.resource_name,resource_base_path=self.resource_base_path).delete_resources(permanent_delete=True)
+            if hasattr(self,"_resource_repository"):
+                delattr(self,"_resource_repository")
         except exceptions.MetaMetadataMissing as ex:
             pass
 
@@ -67,12 +70,21 @@ class BaseTesterMixin(object):
         metadata = dict(zip(self.resource_repository.resource_keys,resource_id))
         return [metadata,content,content_json,content_byte]
 
-
     def populate_test_datas(self):
-        """
-        Implemented by the unittest class to populate the test datas 
-        """
-        raise NotImplementedError("Not Implemented")
+        resource_ids = self.get_test_data_keys()
+        testdatas = OrderedDict()
+        for resource_id in resource_ids:
+            testdatas[resource_id] = self.populate_test_data(resource_id)
+
+        return testdatas
+
+    def populate_test_datas2(self):
+        resource_ids = self.get_test_data_keys2()
+        testdatas = OrderedDict()
+        for resource_id in resource_ids:
+            testdatas[resource_id] = self.populate_test_data(resource_id)
+
+        return testdatas
 
     def prepare_test_datas(self):
         """
@@ -102,6 +114,39 @@ class BaseTesterMixin(object):
         else:
             logger.info("Prepare the test datas for non-archiving resource")
             metadatas = self.populate_test_datas()
+            for resource_id,data in metadatas.items():
+                metadata,content,content_json,content_byte = data
+                #test push_resource
+                self.resource_repository.push_resource(content_byte,metadata)
+
+        return metadatas
+
+    def prepare_test_datas2(self):
+        """
+        Prepare the test datas in resource repository
+        """
+        if self.archive:
+            logger.info("{}Prepare the test datas2 for archiving resource".format(self.prefix))
+            metadatas = {}
+            #publish multiple resource with multiple arcive to storage
+            current_metadatas = self.populate_test_datas2()
+            for resource_id,data in current_metadatas.items():
+                metadata,content,content_json,content_byte = data
+                if resource_id in metadatas:
+                    if "histories" in metadatas[resource_id]:
+                        metadatas[resource_id]["histories"].insert(0,metadatas[resource_id]["current"])
+                    else:
+                        metadatas[resource_id]["histories"] = [metadatas[resource_id]["current"]]
+    
+                    metadatas[resource_id]["current"] = data
+                else:
+                    metadatas[resource_id] = {"current":data}
+    
+                self.resource_repository.push_resource(content_byte,metadata)
+    
+        else:
+            logger.info("Prepare the test datas2 for non-archiving resource")
+            metadatas = self.populate_test_datas2()
             for resource_id,data in metadatas.items():
                 metadata,content,content_json,content_byte = data
                 #test push_resource
@@ -151,7 +196,7 @@ class BaseTesterMixin(object):
 
         return filter_params
 
-    def publish_resourecs(self,testdatas,resource_ids=None):
+    def republish_resources(self,testdatas,resource_ids=None):
         """
         publis all or selected test datas in testdatas dict object
         resource_ids :
@@ -557,7 +602,7 @@ class TestResourceRepositoryMixin(BaseTesterMixin):
 
 
         #republish the deleted resource 
-        self.publish_resourecs(metadatas)
+        self.republish_resources(metadatas)
 
         #check the reources after logical deleting
         self.check_resources(metadatas)
@@ -653,7 +698,7 @@ class TestResourceRepositoryMixin(BaseTesterMixin):
         self.check_resources(metadatas)
 
         #republish the deleted resource 
-        self.publish_resourecs(metadatas)
+        self.republish_resources(metadatas)
 
         #check the reources after logical deleting
         self.check_resources(metadatas)
@@ -764,10 +809,121 @@ class TestResourceRepositoryMixin(BaseTesterMixin):
         self.check_delete_resources(metadatas)
         self.check_storage_empty()
 
+class TestHistoryDataRepositoryMixin(BaseTesterMixin):
+    def get_metadata(self,repo_metadata,resource_id):
+        """
+        Return the resource's metadata from the repository's metadata
+        """
+        for res_id,metadata in repo_metadata:
+            if len(resource_id) == 1:
+                if res_id == resource_id[0]:
+                    return metadata
+            elif isinstance(resource_id,tuple):
+                if res_id == list(resource_id):
+                    return metadata
+            else:
+                if res_id == resource_id:
+                    return metadata
 
-class TestResourceRepositoryClientMixin(BaseTesterMixin):
+        return None
+
+    def test_update(self):
+        self.clean_resources()
+        self.archive=False
+        self.logical_delete=False
+
+        #try to publish an existed resource 
+        testdatas = self.prepare_test_datas()
+        for resource_id,data in testdatas.items():
+            with self.assertRaises(exceptions.ResourceAlreadyExist,msg="Republishing an existing resource should throw ResourceAlreadyExist exception"):
+                self.republish_resources(testdatas,resource_ids=resource_id)
+            break
+
+        #try to publish a resource with a smaller resource id 
+        last_resource_id = self.resource_repository.last_resource_id
+        new_resource_id = list(last_resource_id)
+        new_resource_id[-1] = new_resource_id[-1][0:-1]
+        metadata,content,content_json,content_byte = self.populate_test_data(new_resource_id)
+        with self.assertRaises(exceptions.InvalidResource,msg="Publish a history data with smaller resource id should throw InvalidResource exception"):
+            self.resource_repository.push_resource(content_byte,metadata)
+
+        self.check_delete_resources(testdatas)
+        self.check_storage_empty()
+
+    def test_push_resource(self):
+        self.clean_resources()
+        self.archive=False
+        self.logical_delete=False
+
+        repository = self.resource_repository
+
+        repository = self.resource_repository
+        logger.info("{}:Test push resource".format(self.prefix))
+        #push a test content to blob storage
+        metadatas = self.populate_test_datas()
+        for resource_id,data in metadatas.items():
+            metadata,content,content_json,content_byte = data
+            #test push_resource
+            repo_metadata = self.resource_repository.push_resource(content_byte,metadata)
+            self.assertEqual(
+                self.resource_repository.last_resource_id,
+                resource_id[0] if len(resource_id) == 1 else list(resource_id),
+                "The last resource id({}) is not equal with the expected resource id({})".format(
+                    self.resource_repository.last_resource_id,resource_id
+                )
+            )
+            self.check_metadata_equal(self.get_metadata(repo_metadata,resource_id),metadatas)
+
+        self.check_resources(metadatas)
+        self.check_delete_resources(metadatas)
+        self.check_storage_empty()
+
+    def test_push_json(self):
+        self.clean_resources()
+        self.archive=False
+        self.logical_delete=False
+
+        repository = self.resource_repository
+        logger.info("{}:Test push json".format(self.prefix))
+        #push a test content to blob storage
+        metadatas = self.populate_test_datas()
+        for resource_id,data in metadatas.items():
+            metadata,content,content_json,content_byte = data
+            #test push_resource
+            repo_metadata = self.resource_repository.push_json(content_json,metadata)
+            self.check_metadata_equal(self.get_metadata(repo_metadata,resource_id),metadatas)
+
+        self.check_resources(metadatas)
+        self.check_delete_resources(metadatas)
+        self.check_storage_empty()
+
+    def test_push_file(self):
+        self.clean_resources()
+        self.archive=False
+        self.logical_delete=False
+
+        repository = self.resource_repository
+        logger.info("{}:Test push file".format(self.prefix))
+        #push a test content to blob storage
+        metadatas = self.populate_test_datas()
+        for resource_id,data in metadatas.items():
+            metadata,content,content_json,content_byte = data
+            #test push_resource
+            with open("/tmp/test.json",'wb') as f:
+                f.write(content_byte)
+            repo_metadata = self.resource_repository.push_file("/tmp/test.json",metadata)
+            self.check_metadata_equal(self.get_metadata(repo_metadata,resource_id),metadatas)
+
+
+        self.check_resources(metadatas)
+        self.check_delete_resources(metadatas)
+        self.check_storage_empty()
+
+
+class BaseClientTesterMixin(BaseTesterMixin):
     client_id = "testclinet_01"
 
+    consume_parameters_test_cases = ((False,True,False),(False,True,True),(True,True,False),(True,False,False)) #negative test, stop_if_failed,batch
     @property
     def consume_client(self):
         """
@@ -840,13 +996,13 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
             else:
                 consume_statuses[resource_ids] = ResourceConsumeClient.PHYSICALLY_DELETED
                 
-    def publish_resourecs(self,testdatas,consume_statuses,resource_ids=None):
+    def republish_resources(self,testdatas,consume_statuses,resource_ids=None):
         """
         publish all or selected resources. 
         testdatas: the resources to be published
         resource_id should a tuple(a single resource) ,or list of tuple(a list of resource),or None for all resources
         """
-        super().publish_resourecs(testdatas,resource_ids=resource_ids)
+        super().republish_resources(testdatas,resource_ids=resource_ids)
         if resource_ids is None:
             for resource_id in testdatas.keys():
                 if resource_id in consume_statuses and consume_statuses[resource_id] in (ResourceConsumeClient.UPDATED,ResourceConsumeClient.NOT_CHANGED):
@@ -956,16 +1112,17 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
             index += 1
 
 
-    def get_expected_datas(self,testdatas,consume_statuses,resources=None,failed_resource_ids=[],stop_if_failed=True,batch=False,sortkey_func=None,reconsume=False):
+    def get_expected_datas(self,testdatas,consume_statuses,resources=None,failed_resource_ids=[],stop_if_failed=True,batch=False,sortkey_func=None,reconsume=False,is_sorted=None):
         """
         Get the expected test datas in tuple (is_sorted,expected_datas,expected_failed_datas,expected_unconsumed_datas)
         the returned data can be the exact data expected or all  possible data expected
         """
-        is_sorted = False
         if resources and isinstance(resources,(tuple,list)):
             is_sorted = True
         elif sortkey_func:
             is_sorted = True
+        else:
+            is_sorted = True if is_sorted else False
 
         if batch and failed_resource_ids:
             return (is_sorted,[],[])
@@ -974,12 +1131,13 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
         expected_failed_datas = []
         expected_unconsumed_datas = []
         if resources and isinstance(resources,(tuple,list)):
-            for resource_id,val in testdatas.items():
-                val = val["current"] if self.archive else val
-                if resource_id not in resources:
+            for resource_id in resources:
+                if resource_id not in testdatas:
                     continue
+                val = testdatas[resource_id]["current"] if self.archive else testdatas[resource_id]
                 if reconsume or consume_statuses[resource_id] != ResourceConsumeClient.NOT_CHANGED:
                     expected_datas.append((consume_statuses[resource_id],resource_id,val))
+
         else:
             for resource_id,val in testdatas.items():
                 val = val["current"] if self.archive else val
@@ -1029,11 +1187,11 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
                     expected_unconsumed_datas = expected_failed_datas
         return (is_sorted,expected_datas,expected_failed_datas,expected_unconsumed_datas)
 
-    def check_consume(self,negative_test,testdatas,consume_statuses,resources=None,reconsume=False,sortkey_func=None,stop_if_failed=True,batch=False):
+    def check_consume(self,negative_test,testdatas,consume_statuses,resources=None,reconsume=False,sortkey_func=None,stop_if_failed=True,batch=False,is_sorted=None):
         """
         Check the method "consume"
         """
-        logger.debug("{}Check the method 'consume' in {} mode.resources={},reconsume={},sort={},stop_if_failed={},batch={}".format(self.prefix,"negative" if negative_test else "positive",resources,reconsume,True if sortkey_func else False,stop_if_failed,batch))
+        logger.debug("{}Check the method 'consume' in {} mode.resources={},reconsume={},sort={},stop_if_failed={},batch={}".format(self.prefix,"negative" if negative_test else "positive",resources,reconsume,is_sorted,stop_if_failed,batch))
         #got the failed resource ids
         if negative_test:
             if resources and isinstance(resources,(tuple,list)):
@@ -1092,7 +1250,8 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
             stop_if_failed=stop_if_failed,
             batch=batch,
             sortkey_func=sortkey_func,
-            reconsume=reconsume
+            reconsume=reconsume,
+            is_sorted=is_sorted
         )
         if negative_test:
             if stop_if_failed:
@@ -1125,13 +1284,14 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
                 is_sorted
             ))
 
-        try:
-            consume_result = self.consume_client.consume(_callback,resources=resources,reconsume=reconsume,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed)
-            if expected_failed_datas:
-                self.assertFalse(stop_if_failed,"{}No exception is thrown only if stop_if_failed is False".format(self.prefix))
-            self.check_consume_result(consume_result,consumed_resources,failed_consumed_resources)
-        except TestException as ex:
-            self.assertTrue(stop_if_failed,"{}Exception is thrown only if stop_if_failed is True".format(self.prefix))
+        consume_result = self.consume(_callback,resources=resources,reconsume=reconsume,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed)
+        if expected_failed_datas:
+            if stop_if_failed:
+                self.assertEqual(len(consume_result[1]),1,"{}{} resources are consumed failed,but expect 1 in stop-if-failed mode".format(self.prefix,len(consume_result[1])))
+            else:
+                self.assertEqual(len(consume_result[1]),len(expected_failed_datas),"{}{} resources are consumed failed,but expect {} in non-stop-if-failed mode".format(self.prefix,len(consume_result[1]),len(expected_failed_datas)))
+
+        self.check_consume_result(consume_result,consumed_resources,failed_consumed_resources)
 
         def _get_expected_datas(consumed_resources,expected_datas):
             if negative_test:
@@ -1174,47 +1334,89 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
                 is_sorted
             ))
 
-            consume_result = self.consume_client.consume(_callback,resources=resources,reconsume=reconsume,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed)
+            consume_result = self.consume(_callback,resources=resources,reconsume=reconsume,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed)
             self.check_consume_result(consume_result,consumed_resources,failed_consumed_resources)
 
             self.check_consumed_resource(consume_statuses,consumed_resources,expected_unconsumed_datas,is_sorted,False)
             self.check_consumed_resource(consume_statuses,failed_consumed_resources,[],is_sorted,True)
 
-    def check_resouce_cosuming(self,testdatas,resources=None,sortkey_func=None):
+
+class TestResourceRepositoryClientMixin(BaseClientTesterMixin):
+    def check_resouce_cosuming(self,resources=None,sortkey_func=None,is_sorted=None):
         """
         check resource cosuming feature
         """
 
         logger.info("{}Test resource consuming against the test datas,resources={},sort={}".format(self.prefix,resources,True if sortkey_func else False))
         for negative_test,stop_if_failed,batch in ((False,True,False),(False,True,True),(True,True,False),(True,False,False)):
+            logger.debug("{}Prepare the testing data.negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
+            self.clean_resources()
+            testdatas = self.prepare_test_datas()
+
             self.delete_client()
             consume_statuses = self.get_init_consume_status(testdatas)
             #consume all resources  without order
+            logger.debug("{}Call the method 'consume', all published datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             self.assertTrue(self.consume_client.is_behind(resources=resources),"{}:some resources have been updated/created/deleted since last consuming,but can't find any resources".format(self.prefix))
             self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
     
             #consume all resource again, this time no resource should be consumed
+            logger.debug("{}Call the method 'consume' again, no data should be consued this time.negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
             self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
     
-            #reconsume all resource again, this time no resource should be consumed
+            #reconsume all resource again, 
+            logger.debug("{}Call the method 'consume' to reconsume , all data should be consumed again.negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
             self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch,reconsume=True)
     
+            logger.debug("{}Republish some resources.negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             #republish one resource
             for resource_id in testdatas.keys():
                 if resources and ((isinstance(resources,(list,tuple)) and  resource_id not in resources) or (callable(resources) and not resources(*resource_id))):
                     continue
-                self.publish_resourecs(testdatas,consume_statuses,resource_ids=resource_id)
+                self.republish_resources(testdatas,consume_statuses,resource_ids=resource_id)
                 break
     
             #consume all resource again, this time should conume a updated resource
+            logger.debug("{}Call the method 'consume', republished datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             self.assertTrue(self.consume_client.is_behind(resources=resources),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
             self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
             self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
+
+            #publish some new resources
+            logger.debug("{}Publish some resources.negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
+            testdatas2 = self.prepare_test_datas2()
+            consume_statuses.update(self.get_init_consume_status(testdatas2))
+            has_new_resource = False
+            for resource_id,data in testdatas2.items():
+                testdatas[resource_id] = data
+                if resources:
+                    if callable(resources):
+                        if resources(*resource_id):
+                            has_new_resource = True
+                    elif resource_id in resources:
+                        has_new_resource = True
+
+                else:
+                    has_new_resource = True
+
+            if has_new_resource:
+                #consume all resource again, this time should conume some new resources 
+                logger.debug("{}Call the method 'consume', new published datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
+                self.assertTrue(self.consume_client.is_behind(resources=resources),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
+                self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
+                self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
+            else:
+                #consume all resource again, this time should conume no resources because new resources is not in resources filter
+                logger.debug("{}Call the method 'consume', no datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
+                self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resources which is satisified by the resource filter have been updated/created/deleted since last consuming,but find anything".format(self.prefix))
+                self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
+
     
             if self.logical_delete:
                 #logically delete one resource
+                logger.debug("{}Logically delete some resources .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
                 deleted_resource_id = None
                 for resource_id in testdatas.keys():
                     if resources and ((isinstance(resources,(list,tuple)) and  resource_id not in resources) or (callable(resources) and not resources(*resource_id))):
@@ -1224,19 +1426,23 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
                     break
     
                 #consume all resource again, this time should conume a logically deleted resource
+                logger.debug("{}Call the method 'consume', logically deleted datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
                 self.assertTrue(self.consume_client.is_behind(resources=resources),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
                 self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
                 self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
     
                 #republish the logically deleted resource
-                self.publish_resourecs(testdatas,consume_statuses,resource_ids=deleted_resource_id)
+                logger.debug("{}Republish the logically deleted resources .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
+                self.republish_resources(testdatas,consume_statuses,resource_ids=deleted_resource_id)
     
                 #consume all resource again, this time should conume an updated resource
+                logger.debug("{}Call the method 'consume', republished datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
                 self.assertTrue(self.consume_client.is_behind(resources=resources),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
                 self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
                 self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
     
             #permanently delete one resource
+            logger.debug("{}Permanently delete some resources .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             deleted_resource_id = None
             for resource_id in testdatas.keys():
                 if resources and ((isinstance(resources,(list,tuple)) and  resource_id not in resources) or (callable(resources) and not resources(*resource_id))):
@@ -1246,24 +1452,28 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
                 break
     
             #consume all resource again, this time should conume a physically deleted resource
+            logger.debug("{}Call the method 'consume', permanently deleted datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             self.assertTrue(self.consume_client.is_behind(resources=resources),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
             self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
             self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
     
             #republish the physically deleted resource
-            self.publish_resourecs(testdatas,consume_statuses,resource_ids=deleted_resource_id)
+            logger.debug("{}Republish the permanently deleted resources .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
+            self.republish_resources(testdatas,consume_statuses,resource_ids=deleted_resource_id)
     
             #consume all resource again, this time should conume an updated resource
+            logger.debug("{}Call the method 'consume', republished datas should be consumed .negative test={},stop_if_failed={},batch={}".format(self.prefix,negative_test,stop_if_failed,batch))
             self.assertTrue(self.consume_client.is_behind(resources=resources),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
             self.check_consume(negative_test,testdatas,consume_statuses,resources=resources,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed,batch=batch)
             self.assertFalse(self.consume_client.is_behind(resources=resources),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
+
+    def consume(self,callback,resources=None,reconsume=False,sortkey_func=None,stop_if_failed=True):
+        return self.consume_client.consume(callback,resources=resources,reconsume=reconsume,sortkey_func=sortkey_func,stop_if_failed=stop_if_failed)
 
     def check(self):
         """
         Check method for different test cases
         """
-        testdatas = self.prepare_test_datas()
-
         #clean the clients
         self.delete_all_clients()
         #check whether have no clients
@@ -1272,19 +1482,19 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
         #check the normal case
         print("======================================================")
         logger.info("{}Test normal use case ".format(self.prefix))
-        self.check_resouce_cosuming(testdatas)
+        self.check_resouce_cosuming()
 
         print("======================================================")
         logger.info("{}Test resource consuming with specified resource list".format(self.prefix))
-        resource_ids = [k for k in testdatas.keys()]
+        resource_ids = self.get_test_data_keys()
         del resource_ids[0]
         del resource_ids[-1]
-        self.check_resouce_cosuming(testdatas,resources=resource_ids)
+        self.check_resouce_cosuming(resources=resource_ids)
 
         print("======================================================")
         logger.info("{}Test resource consuming with specified resource filter".format(self.prefix))
         resource_filter = lambda *resource_id: any((k in resource_id[-1]) for k in ("test3.txt","test5.txt","test1.txt"))
-        self.check_resouce_cosuming(testdatas,resources=resource_filter)
+        self.check_resouce_cosuming(resources=resource_filter)
 
         def _sort_func(args):
             resource_id = args[1]
@@ -1296,13 +1506,13 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
 
         print("======================================================")
         logger.info("{}Test sorted resource consuming ".format(self.prefix))
-        self.check_resouce_cosuming(testdatas,sortkey_func=_sort_func)
+        self.check_resouce_cosuming(sortkey_func=_sort_func)
 
 
         print("======================================================")
         logger.info("{}Test sorted resource consuming with resource filter".format(self.prefix))
         resource_filter = lambda *resource_id: any((k in resource_id[-1]) for k in ("test3.txt","test5.txt","test1.txt","test6.txt"))
-        self.check_resouce_cosuming(testdatas,sortkey_func=_sort_func,resources=resource_filter)
+        self.check_resouce_cosuming(sortkey_func=_sort_func,resources=resource_filter)
 
         #clean the clients
         self.delete_all_clients()
@@ -1311,29 +1521,93 @@ class TestResourceRepositoryClientMixin(BaseTesterMixin):
 
     def test_no_archive(self):
         #prepare the data
-        self.clean_resources()
         self.archive = False
         self.logical_delete = False
         self.check()
 
     def test_archive(self):
         #prepare the data
-        self.clean_resources()
         self.archive = True
         self.logical_delete = False
         self.check()
 
     def test_logical_delete(self):
         #prepare the data
-        self.clean_resources()
         self.archive = False
         self.logical_delete = True
         self.check()
 
     def test_logical_delete_with_archive(self):
         #prepare the data
-        self.clean_resources()
         self.archive = True
         self.logical_delete = True
         self.check()
+
+class TestHistoryDataRepositoryClientMixin(BaseClientTesterMixin):
+    consume_parameters_test_cases = ((False,True,False),(True,True,False)) #negative test, stop_if_failed,batch
+
+    def consume(self,callback,resources=None,reconsume=False,sortkey_func=None,stop_if_failed=True):
+        return self.consume_client.consume(callback)
+
+    def check_resouce_cosuming(self):
+        """
+        check resource cosuming feature
+        """
+        logger.info("{}Test history data consuming against the test datas".format(self.prefix))
+        stop_if_failed = True
+        batch=False
+        for negative_test in (False,True):
+            self.clean_resources()
+            logger.debug("{}Prepare the testing data.negative test={}".format(self.prefix,negative_test))
+            testdatas = self.prepare_test_datas()
+            self.delete_client()
+
+            consume_statuses = self.get_init_consume_status(testdatas)
+            #consume all resources  without order
+            logger.debug("{}Call the method 'consume', all published datas should be consumed .negative test={}".format(self.prefix,negative_test))
+            self.assertTrue(self.consume_client.is_behind(),"{}:some resources have been updated/created/deleted since last consuming,but can't find any resources".format(self.prefix))
+            self.check_consume(negative_test,testdatas,consume_statuses,stop_if_failed=stop_if_failed,batch=batch,is_sorted=True)
+    
+            #consume all resource again, this time no resource should be consumed
+            logger.debug("{}Call the method 'consume' again, no data should be consued this time.negative test={}".format(self.prefix,negative_test))
+            self.assertFalse(self.consume_client.is_behind(),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
+            self.check_consume(negative_test,testdatas,consume_statuses,stop_if_failed=stop_if_failed,batch=batch,is_sorted=True)
+    
+            #publisg some new resources
+            logger.debug("{}Publish some new test datas.negative test={}".format(self.prefix,negative_test))
+            testdatas2 = self.prepare_test_datas2()
+            consume_statuses.update(self.get_init_consume_status(testdatas2))
+            for resource_id,data in testdatas2.items():
+                testdatas[resource_id] = data
+
+            #consume all resource again, this time should conume some new resources
+            logger.debug("{}Call the method 'consume', all published datas should be consumed .negative test={}".format(self.prefix,negative_test))
+            self.assertTrue(self.consume_client.is_behind(),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
+            self.check_consume(negative_test,testdatas,consume_statuses,stop_if_failed=stop_if_failed,batch=batch,is_sorted=True)
+            self.assertFalse(self.consume_client.is_behind(),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
+    
+            #consume all resource again, this time should conume a updated resource
+            logger.debug("{}Call the method 'consume' again, no data should be consued this time.negative test={}".format(self.prefix,negative_test))
+            self.assertFalse(self.consume_client.is_behind(),"{}:some resources have been updated/created/deleted since last consuming,but can't find anything".format(self.prefix))
+            self.check_consume(negative_test,testdatas,consume_statuses,stop_if_failed=stop_if_failed,batch=batch,is_sorted=True)
+    
+    def test_consume(self):
+        #prepare the data
+        self.archive = False
+        self.logical_delete = False
+
+        #clean the clients
+        self.delete_all_clients()
+        #check whether have no clients
+        self.check_no_clients()
+
+        #check the normal case
+        print("======================================================")
+        logger.info("{}Test normal use case ".format(self.prefix))
+        self.check_resouce_cosuming()
+
+        #clean the clients
+        self.delete_all_clients()
+
+        self.clean_resources()
 

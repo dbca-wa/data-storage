@@ -41,12 +41,7 @@ LOG_CONFIG = {
     'loggers': {
         'data_storage': {
             'handlers': ['console'],
-            'level': 'INFO' if DEBUG else 'WARNING',
-            'propagate':False
-        },
-        'data_storage.unittest': {
-            'handlers': ['console'],
-            'level': 'DEBUG' if DEBUG else 'WARNING',
+            'level': 'DEBUG' if DEBUG else 'INFO',
             'propagate':False
         },
     },

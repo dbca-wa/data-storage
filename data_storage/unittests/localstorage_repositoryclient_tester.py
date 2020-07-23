@@ -25,8 +25,8 @@ class TestResourceRepositoryClient(TestResourceRepositoryClientMixin,unittest.Te
             logical_delete=self.logical_delete
         )
 
-    def populate_test_datas(self):
-        resource_ids = [
+    def get_test_data_keys(self):
+        return [
             ("/test/2018_05_02_test2.txt",),
             ("test2/2019_06_02_test4.txt",),
             ("2018_05_01_test1.txt",),
@@ -34,11 +34,12 @@ class TestResourceRepositoryClient(TestResourceRepositoryClientMixin,unittest.Te
             ("test/2019_06_01_test3.txt",),
             ("test2/2020_07_02_test6.txt",)
         ]
-        testdatas = {}
-        for resource_id in resource_ids:
-            testdatas[resource_id] = self.populate_test_data(resource_id)
 
-        return testdatas
+    def get_test_data_keys2(self):
+        return [
+            ("/test/2021_07_01_test7.txt",),
+            ("test2/2021_07_02_test8.txt",),
+        ]
 
 class TestIndexedResourceRepositoryClient(TestResourceRepositoryClient):
     resource_base_path = "indexedresourcerepository"
@@ -53,22 +54,6 @@ class TestIndexedResourceRepositoryClient(TestResourceRepositoryClient):
             cache=self.cache,
             logical_delete=self.logical_delete
         )
-
-    def populate_test_datas(self):
-        resource_ids = [
-            ("2018_05_01_test1.txt",),
-            ("/test/2018_05_02_test2.txt",),
-            ("test/2019_06_01_test3.txt",),
-            ("test2/2019_06_02_test4.txt",),
-            ("test/2020_07_01_test5.txt",),
-            ("test2/2020_07_02_test6.txt",)
-        ]
-        testdatas = {}
-        for resource_id in resource_ids:
-            testdatas[resource_id] = self.populate_test_data(resource_id)
-
-        return testdatas
-
 
 class TestGroupResourceRepositoryClient(TestResourceRepositoryClientMixin,unittest.TestCase):
     storage = LocalStorage(settings.LOCAL_STORAGE_ROOT_FOLDER)
@@ -85,8 +70,8 @@ class TestGroupResourceRepositoryClient(TestResourceRepositoryClientMixin,unitte
             logical_delete=self.logical_delete
         )
 
-    def populate_test_datas(self):
-        resource_ids = [
+    def get_test_data_keys(self):
+        return [
             ("2019_06","2019_06_01_test3.txt"),
             ("2019_06","2019_06_02_test4.txt"),
             ("2018_05","2018_05_01_test1.txt"),
@@ -94,11 +79,12 @@ class TestGroupResourceRepositoryClient(TestResourceRepositoryClientMixin,unitte
             ("2020_07","2020_07_01_test5.txt"),
             ("2020_07","2020_07_02_test6.txt")
         ]
-        testdatas = {}
-        for resource_id in resource_ids:
-            testdatas[resource_id] = self.populate_test_data(resource_id)
 
-        return testdatas
+    def get_test_data_keys2(self):
+        return [
+            ("2021_07","2021_07_01_test7.txt"),
+            ("2021_07","2021_07_02_test8.txt")
+        ]
 
 class TestIndexedGroupResourceRepositoryClient(TestGroupResourceRepositoryClient):
     resource_base_path = "indexedgroupresourcerepository"
