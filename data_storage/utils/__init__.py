@@ -10,8 +10,13 @@ import base64
 import shutil
 import ast
 import dill
+import types
+import logging
+import traceback
 
 from .classproperty import classproperty,cachedclassproperty
+
+logger = logging.getLogger(__name__)
 
 class JSONEncoder(json.JSONEncoder):
     """
@@ -30,10 +35,13 @@ class JSONEncoder(json.JSONEncoder):
                 "value":obj.strftime("%Y-%m-%d")
             }
         elif obj.__class__.__name__ == 'function':
-            return {
+            serialized_obj = {
                 "_type":"function",
-                "value":base64.b64encode(dill.dumps(obj)).decode()
+                "code":base64.b64encode(dill.dumps(obj.__code__)).decode()
             }
+            if obj.__closure__:
+                serialized_obj["closure"] = base64.b64encode(dill.dumps(obj.__closure__)).decode()
+            return serialized_obj
         else:
             return json.JSONEncoder.default(self,obj)
 
@@ -55,7 +63,11 @@ class JSONDecoder(json.JSONDecoder):
         elif t == 'date':
             return datetime.datetime.strptime(obj["value"],"%Y-%m-%d").date()
         elif t == 'function':
-            return dill.loads(base64.b64decode(obj["value"]))
+            try:
+                return types.FunctionType(dill.loads(base64.b64decode(obj["code"])),{},closure=(dill.loads(base64.b64decode(obj["closure"])) if "closure" in obj else None))
+            except:
+                logger.error("Decode function object failed.{}".format(traceback.format_exc()))
+                return None
         else:
             return obj
 
