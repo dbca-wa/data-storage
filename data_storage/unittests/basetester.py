@@ -810,6 +810,31 @@ class TestResourceRepositoryMixin(BaseTesterMixin):
         self.check_storage_empty()
 
 class TestHistoryDataRepositoryMixin(BaseTesterMixin):
+    f_earliest_id = None
+
+    prop_f_earliest_id = "_f_earliest_resource_id"
+    @property
+    def resource_repository(self):
+        """
+        Return the resource repository to manage the resource
+        """
+        if not hasattr(self,"_resource_repository") or any(getattr(self._resource_repository,prop) != value for prop,value in [
+            ("archive",self.archive),
+            ("cache",self.cache),
+            ("logical_delete",self.logical_delete),
+            (self.prop_f_earliest_id,self.f_earliest_id)
+        ]):
+            self._resource_repository = self.create_resource_repository()
+            self.prefix = "{}(archive={},logical_delete={}):".format(self.__class__.__name__,self.archive,self.logical_delete)
+        return self._resource_repository
+
+    def set_f_earliest_id(self,resource_id):
+        """
+        Set the f_earliest_id against resource id
+        Return True if a new f_earliest_is is set; otherwise return False
+        """
+        return False
+
     def get_metadata(self,repo_metadata,resource_id):
         """
         Return the resource's metadata from the repository's metadata
@@ -831,6 +856,7 @@ class TestHistoryDataRepositoryMixin(BaseTesterMixin):
         self.clean_resources()
         self.archive=False
         self.logical_delete=False
+        self._f_earliest_id=None
 
         #try to publish an existed resource 
         testdatas = self.prepare_test_datas()
@@ -841,7 +867,10 @@ class TestHistoryDataRepositoryMixin(BaseTesterMixin):
 
         #try to publish a resource with a smaller resource id 
         last_resource_id = self.resource_repository.last_resource_id
-        new_resource_id = list(last_resource_id)
+        if isinstance(last_resource_id,str):
+            new_resource_id = [last_resource_id]
+        else:
+            new_resource_id = list(last_resource_id)
         new_resource_id[-1] = new_resource_id[-1][0:-1]
         metadata,content,content_json,content_byte = self.populate_test_data(new_resource_id)
         with self.assertRaises(exceptions.InvalidResource,msg="Publish a history data with smaller resource id should throw InvalidResource exception"):
@@ -850,12 +879,43 @@ class TestHistoryDataRepositoryMixin(BaseTesterMixin):
         self.check_delete_resources(testdatas)
         self.check_storage_empty()
 
+    def test_auto_clean(self):
+        self.clean_resources()
+        self.archive=False
+        self.logical_delete=False
+        self._f_earliest_id=None
+
+        logger.info("{}:Test auto clean".format(self.prefix))
+        #push a test content to blob storage
+        metadatas = self.populate_test_datas()
+        first_resource_id = None
+        repo_first_resource_id = None
+        for resource_id,data in metadatas.items():
+            metadata,content,content_json,content_byte = data
+            repository = self.resource_repository
+            if self.set_f_earliest_id(resource_id):
+                first_resource_id = resource_id
+            elif not self._f_earliest_id and not first_resource_id:
+                first_resource_id = resource_id
+
+            #test push_resource
+            repo_metadata = self.resource_repository.push_resource(content_byte,metadata)
+            if len(self.resource_repository.resource_keys) == 1:
+                for res_id,res_meta in self.resource_repository.metadata_client.resources_in_range(None,resource_id[0],max_resource_included=True):
+                    repo_first_resource_id = (res_id,)
+                    break
+            else:
+                for res_id,res_meta in self.resource_repository.metadata_client.resources_in_range(None,resource_id,max_resource_included=True):
+                    repo_first_resource_id = tuple(res_id)
+                    break
+            self.assertEqual(repo_first_resource_id,first_resource_id,"{}The first resource id in repository is {}, but expect {}".format(self.prefix,repo_first_resource_id,first_resource_id))
+
+
     def test_push_resource(self):
         self.clean_resources()
         self.archive=False
         self.logical_delete=False
-
-        repository = self.resource_repository
+        self._f_earliest_id=None
 
         repository = self.resource_repository
         logger.info("{}:Test push resource".format(self.prefix))
@@ -882,6 +942,7 @@ class TestHistoryDataRepositoryMixin(BaseTesterMixin):
         self.clean_resources()
         self.archive=False
         self.logical_delete=False
+        self._f_earliest_id=None
 
         repository = self.resource_repository
         logger.info("{}:Test push json".format(self.prefix))
@@ -901,6 +962,7 @@ class TestHistoryDataRepositoryMixin(BaseTesterMixin):
         self.clean_resources()
         self.archive=False
         self.logical_delete=False
+        self._f_earliest_id=None
 
         repository = self.resource_repository
         logger.info("{}:Test push file".format(self.prefix))
@@ -1573,7 +1635,7 @@ class TestHistoryDataRepositoryClientMixin(BaseClientTesterMixin):
             self.assertFalse(self.consume_client.is_behind(),"{}:no resource is updated/created/deleted since last consuming,but find some resources".format(self.prefix))
             self.check_consume(negative_test,testdatas,consume_statuses,stop_if_failed=stop_if_failed,batch=batch,is_sorted=True)
     
-            #publisg some new resources
+            #publish some new resources
             logger.debug("{}Publish some new test datas.negative test={}".format(self.prefix,negative_test))
             testdatas2 = self.prepare_test_datas2()
             consume_statuses.update(self.get_init_consume_status(testdatas2))

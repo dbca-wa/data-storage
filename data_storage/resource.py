@@ -33,7 +33,14 @@ def compare_resource_id(resource_id1,resource_id2):
     if isinstance(resource_id1,(list,tuple)):
         index = 0
         while index < len(resource_id1):
-            if resource_id1[index] < resource_id2[index]:
+            if resource_id1[index] is None:
+                if resource_id2[index] is None:
+                    index += 1
+                else:
+                    return -1
+            elif resource_id2[index] is None:
+                return 1
+            elif resource_id1[index] < resource_id2[index]:
                 return -1
             elif resource_id1[index] == resource_id2[index]:
                 index += 1
@@ -565,6 +572,20 @@ class IndexedResourceRepositoryMetadataMixin(MetadataIndex):
         else:
             return None
 
+    @property
+    def current_metadata_index(self):
+        """
+        Return the index of the meatadata file in metadata index;return None if not found
+        """
+        indexed_meta = self.json
+        index = 0
+        while index < len(indexed_meta):
+            if indexed_meta[index][0] == self._current_metaname:
+                return index
+            index += 1
+
+        return None
+
 
     def resource_metadatas(self,throw_exception=True,resource_status=ResourceConstant.NORMAL_RESOURCE,resource_file="current",**kwargs):
         """
@@ -614,7 +635,7 @@ class IndexedResourceRepositoryMetadataMixin(MetadataIndex):
         metadata = self.metadata_client.remove_resource(*args,permanent_delete=permanent_delete)
         if metadata and (not self._logical_delete or permanent_delete):
             #resource is deleted, delete the metadata file from indexed metadata if the metadata file is deleted
-            if self.metadata_client.json is None:
+            if not self.metadata_client.json:
                 #metadata file was deleted,remove it from indexed file
                 self.remove_metafile(self._current_metaname)
         return metadata
@@ -670,11 +691,72 @@ class IndexedHistoryDataRepositoryMetadataMixin(IndexedResourceRepositoryMetadat
     
     def find_resource_index(self,resource_id,policy=EQUAL):
         if len(self.resource_keys) == 1:
-            metaname = self._f_metaname(resource_id)
+            self._current_metaname = self._f_metaname(resource_id)
         else:
-            metaname = self._f_metaname(resource_id[0])
+            self._current_metaname = self._f_metaname(resource_id[0])
 
-        return self.create_metadata_client(metaname).find_resource_index(resource_id,policy=policy)
+        index = self.metadata_client.find_resource_index(resource_id,policy=policy)
+        if index == -1 and policy != EQUAL:
+            #can't find a resource which is greater than or equal with the resource_id. 
+            #if current metadata file is not the last current metadata file, set the next metadata file as the current metadata file, and return 0
+            indexed_meta = self.json
+            current_index = self.current_metadata_index
+            if policy in (GREATER_AND_EQUAL,GREATER):
+                if current_index < len(indexed_meta) - 1:
+                    self._current_metaname = indexed_meta[current_index + 1][0]
+                    index = 0
+            elif current_index > 0:
+                self._current_metaname = indexed_meta[current_index - 1][0]
+                index = len(self.metadata_client.json) - 1
+
+
+        return index
+
+
+    def resources_in_range(self,min_resource_id,max_resource_id,min_resource_included=True,max_resource_included=False):
+        """
+        Return a generator to navigate the (resource_id,metadata) of the resource from min_resource_id to max_resource_id
+        """
+        indexed_meta = self.json 
+        if min_resource_id:
+            if len(self.resource_keys) == 1:
+                min_metaname = self._f_metaname(min_resource_id)
+            else:
+                min_metaname = self._f_metaname(min_resource_id[0])
+        else:
+            min_metaname = None
+
+        if max_resource_id:
+            if len(self.resource_keys) == 1:
+                max_metaname = self._f_metaname(max_resource_id)
+            else:
+                max_metaname = self._f_metaname(max_resource_id[0])
+        else:
+            max_metaname = None
+
+        for metaname,metapath in indexed_meta:
+            if min_metaname is None:
+                min_id = None
+            elif metaname == min_metaname:
+                min_id = min_resource_id
+            elif metaname < min_metaname:
+                continue
+            else:
+                min_id = None
+            
+            if max_metaname is None:
+                max_id = None
+            elif metaname == max_metaname:
+                max_id = max_resource_id
+            elif metaname < max_metaname:
+                max_id = None
+            else:
+                break
+
+            self._current_metaname = metaname
+
+            for resource_id,metadata in self.metadata_client.resources_in_range(min_id,max_id,min_resource_included=min_resource_included,max_resource_included=max_resource_included):
+                yield (resource_id,metadata)
 
 class ResourceRepositoryMetadataBase(MetadataBase):
     """
@@ -909,7 +991,7 @@ class HistoryDataRepositoryMetadataBase(MetadataBase):
         """
         Return a tuple(last resource's id, last resource's metadata) ; return None if no last resource
         """
-        metadata = self.json or []
+        metadata = self.json
         if metadata:
             return metadata[-1]
         else:
@@ -965,6 +1047,34 @@ class HistoryDataRepositoryMetadataBase(MetadataBase):
                     if not matched:
                         continue
             yield res_metadata
+
+    def resources_in_range(self,min_resource_id,max_resource_id,min_resource_included=True,max_resource_included=False):
+        """
+        Return a generator to navigate the (resource_id,metadata) of the resource from min_resource_id to max_resource_id
+        """
+        metadata = self.json
+        if min_resource_id:
+            min_index = self.find_resource_index(min_resource_id,policy=GREATER_AND_EQUAL if min_resource_included else GREATER)
+            if min_index == -1:
+                return
+            elif min_index == 0:
+                min_index = None
+        else:
+            min_index = None
+
+        if max_resource_id:
+            max_index = self.find_resource_index(max_resource_id,policy=LESS_AND_EQUAL if max_resource_included else LESS)
+            if max_index == -1:
+                return
+            elif max_index >= len(metadata) - 1:
+                mex_index = None
+            else:
+                max_index += 1
+        else:
+            max_index = None
+
+        for resource_id, res_metadata in metadata if (min_index is None and max_index is None) else metadata[min_index or 0:max_index or len(metadata)]:
+            yield (resource_id,res_metadata)
 
     def get_resource_metadata(self,*args,resource_file="current",resource_status=ResourceConstant.NORMAL_RESOURCE):
         """
@@ -1516,6 +1626,70 @@ class HistoryDataRepositoryBase(ResourceRepositoryBase):
 
         return super().push_file(filename,metadata=metadata,f_post_push=f_post_push)
 
+
+class HistoryDataCleanMixin(object):
+    def get_earliest_id(self):
+        """
+        earliest_id is 
+            resource id for HistoryDataRepository
+            (resource_group,resource_id) for GroupHistoryDataRepository
+            meta_name for indexed history data repository
+        """
+        raise NotImplementedError("The method 'get_earliest_id' Not Implemented")
+
+    def auto_clean(self):
+        max_resource_id = self.get_earliest_id()
+        if not max_resource_id:
+            return
+        for resource_id,res_meta in self._metadata_client.resources_in_range(None,max_resource_id,max_resource_included=False):
+            if len(self.resource_keys) == 1:
+                self.delete_resource(resource_id)
+            else:
+                self.delete_resource(*resource_id)
+
+    def push_resource(self,data,metadata,f_post_push=None,length=None):
+        result = super().push_resource(data,metadata,f_post_push=f_post_push,length=length)
+        try:
+            self.auto_clean()
+        except Exception as ex:
+            logger.error("Failed to clean the history data.{}".format(str(ex)))
+        return result
+
+    def push_file(self,filename,metadata=None,f_post_push=None):
+        result = super().push_file(filename,metadata=metadata,f_post_push=f_post_push)
+        try:
+            self.auto_clean()
+        except Exception as ex:
+            logger.error("Failed to clean the history data.{}".format(str(ex)))
+        return result
+
+class IndexedHistoryDataCleanMixin(HistoryDataCleanMixin):
+    def get_earliest_id(self):
+
+        return self._f_earliest_metaname(self.last_resource_id) if self._f_earliest_metaname else None
+
+    def auto_clean(self):
+        max_metaname = self.get_earliest_id()
+        if not max_metaname:
+            return
+        
+        while True:
+            indexed_meta = self._metadata_client.json 
+            if not indexed_meta:
+                #can't find any metafile
+                break
+
+            metaname = indexed_meta[0][0]
+            if metaname >= max_metaname:
+                #the first metafile is greater than or equal with max_metaname
+                break
+            #remove all resoures in the first meta file
+            for resource_id,res_meta in self._metadata_client.create_metadata_client(metaname).json:
+                if len(self.resource_keys) == 1:
+                    self.delete_resource(resource_id)
+                else:
+                    self.delete_resource(*resource_id)
+
 class ResourceRepository(ResourceRepositoryBase):
     def __init__(self,storage,resource_name,resource_base_path=None,archive=False,metaname="metadata",cache=True,logical_delete=False):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
@@ -1527,16 +1701,23 @@ class GroupResourceRepository(ResourceRepositoryBase):
         self._metadata_client = GroupResourceRepositoryMetadata(storage,resource_base_path=self._resource_base_path,cache=cache,metaname=metaname,archive=archive,logical_delete=logical_delete)
 
 
-class HistoryDataRepository(HistoryDataRepositoryBase):
-    def __init__(self,storage,resource_name,resource_base_path=None,metaname="metadata",cache=True):
+class HistoryDataRepository(HistoryDataCleanMixin,HistoryDataRepositoryBase):
+    def __init__(self,storage,resource_name,resource_base_path=None,metaname="metadata",cache=True,f_earliest_resource_id = None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
         self._metadata_client = HistoryDataRepositoryMetadata(storage,resource_base_path=self._resource_base_path,cache=cache,metaname=metaname)
+        self._f_earliest_resource_id = f_earliest_resource_id
 
-class GroupHistoryDataRepository(HistoryDataRepositoryBase):
-    def __init__(self,storage,resource_name,resource_base_path=None,metaname="metadata",cache=True):
+    def get_earliest_id(self):
+        return self._f_earliest_resource_id(self.last_resource_id) if self._f_earliest_resource_id else None
+
+class GroupHistoryDataRepository(HistoryDataCleanMixin,HistoryDataRepositoryBase):
+    def __init__(self,storage,resource_name,resource_base_path=None,metaname="metadata",cache=True,f_earliest_group=None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
         self._metadata_client = GroupHistoryDataRepositoryMetadata(storage,resource_base_path=self._resource_base_path,cache=cache,metaname=metaname)
+        self._f_earliest_group = f_earliest_group
 
+    def get_earliest_id(self):
+        return (self._f_earliest_group(self.last_resource_id),None) if self._f_earliest_group else None
 
 class IndexedResourceRepository(ResourceRepositoryBase):
     def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,archive=False,index_metaname="_metadata_index",cache=True,logical_delete=False):
@@ -1548,15 +1729,17 @@ class IndexedGroupResourceRepository(ResourceRepositoryBase):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
         self._metadata_client = IndexedGroupResourceRepositoryMetadata(storage,f_metaname,resource_base_path=self._resource_base_path,cache=cache,archive=archive,index_metaname=index_metaname,logical_delete=logical_delete)
 
-class IndexedHistoryDataRepository(HistoryDataRepositoryBase):
-    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,index_metaname="_metadata_index",cache=True):
+class IndexedHistoryDataRepository(IndexedHistoryDataCleanMixin,HistoryDataRepositoryBase):
+    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,index_metaname="_metadata_index",cache=True,f_earliest_metaname=None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
         self._metadata_client = IndexedHistoryDataRepositoryMetadata(storage,f_metaname,resource_base_path=self._resource_base_path,cache=cache,index_metaname=index_metaname)
+        self._f_earliest_metaname = f_earliest_metaname
 
-class IndexedGroupHistoryDataRepository(HistoryDataRepositoryBase):
-    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,index_metaname="_metadata_index",cache=True):
+class IndexedGroupHistoryDataRepository(IndexedHistoryDataCleanMixin,HistoryDataRepositoryBase):
+    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,index_metaname="_metadata_index",cache=True,f_earliest_metaname=None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
         self._metadata_client = IndexedGroupHistoryDataRepositoryMetadata(storage,f_metaname,resource_base_path=self._resource_base_path,cache=cache,index_metaname=index_metaname)
+        self._f_earliest_metaname = f_earliest_metaname
 
 
 def get_resource_repository(storage,resource_name,resource_base_path=None,cache=True):
@@ -2321,7 +2504,7 @@ class HistoryDataConsumeClient(BasicConsumeClient):
         if index == -1:
             return consume_result
 
-        for resource_ids,res_meta in metadata[index:]:
+        for resource_ids,res_meta in self._resource_repository.metadata_client.resources_in_range(self.last_consumed_resource_id,None,min_resource_included=False):
             res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
 
             if not res_consume_status:
