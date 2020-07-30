@@ -6,11 +6,11 @@ from collections import OrderedDict
 from data_storage import LocalStorage,get_resource_repository,HistoryDataRepository,GroupHistoryDataRepository,ResourceConstant,IndexedHistoryDataRepository,IndexedGroupHistoryDataRepository
 
 from . import settings
-from .basetester import TestHistoryDataRepositoryClientMixin
+from .basetester import TestHistoryDataRepositoryClientMixin,TestLocalStoragePermissionMixin
 
 logger = logging.getLogger(__name__)
 
-class TestHistoryDataRepositoryClient(TestHistoryDataRepositoryClientMixin,unittest.TestCase):
+class TestHistoryDataRepositoryClient(TestLocalStoragePermissionMixin,TestHistoryDataRepositoryClientMixin,unittest.TestCase):
     storage = LocalStorage(settings.LOCAL_STORAGE_ROOT_FOLDER)
     resource_base_path = "historydatapository"
 

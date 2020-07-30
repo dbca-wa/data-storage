@@ -7,3 +7,6 @@ cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.u
 
 #cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.unittests.localstorage_historydata_repository_tester ; deactivate
 #cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.unittests.localstorage_historydata_repository_tester data_storage.unittests.localstorage_historydata_repositoryclient_tester; deactivate
+
+#cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.unittests.localstorage_historydata_repositoryclient_tester.TestHistoryDataRepositoryClient.test_folder_access_permission; deactivate
+

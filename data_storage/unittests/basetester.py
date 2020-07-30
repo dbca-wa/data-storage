@@ -1,7 +1,9 @@
 import unittest
 import json
 import os
+import stat
 import time
+import shutil
 import logging
 from collections import OrderedDict
 
@@ -1605,6 +1607,7 @@ class TestResourceRepositoryClientMixin(BaseClientTesterMixin):
         self.logical_delete = True
         self.check()
 
+
 class TestHistoryDataRepositoryClientMixin(BaseClientTesterMixin):
     consume_parameters_test_cases = ((False,True,False),(True,True,False)) #negative test, stop_if_failed,batch
 
@@ -1672,4 +1675,38 @@ class TestHistoryDataRepositoryClientMixin(BaseClientTesterMixin):
         self.delete_all_clients()
 
         self.clean_resources()
+
+class TestLocalStoragePermissionMixin(object):
+    def test_folder_access_permission(self):
+        self.archive = False
+        self.logical_delete = False
+
+        self.clean_resources()
+        res_dir = os.path.join(settings.LOCAL_STORAGE_ROOT_FOLDER,self.resource_base_path)
+        shutil.rmtree(res_dir)
+
+        file_permission = stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU
+
+
+        print("======================================================")
+        logger.info("{}Test file access mode ".format(self.prefix))
+
+        testdatas = self.prepare_test_datas()
+        file_status = os.stat(res_dir)
+        self.assertEqual(file_status.st_mode&file_permission,file_permission,"Dir({}) is not fully accessable".format(res_dir))
+        
+        self.consume_client.consume(lambda status,res_meta,res_file:print("process {}".format(res_file)))
+
+        clients_dir = os.path.join(self.resource_repository._storage._root_path,self.resource_repository._resource_base_path,"clients")
+        file_status = os.stat(clients_dir)
+        self.assertEqual(file_status.st_mode&file_permission,file_permission,"Dir({}) is not fully accessable".format(clients_dir))
+
+        clients_metadata_file = os.path.join(self.resource_repository._storage._root_path,self.resource_repository._resource_base_path,"clients_metadata.json")
+        file_status = os.stat(clients_metadata_file)
+        self.assertEqual(file_status.st_mode&file_permission,file_permission,"Dir({}) is not fully accessable".format(clients_metadata_file))
+
+        #clean the clients
+        self.delete_all_clients()
+        self.clean_resources()
+
 

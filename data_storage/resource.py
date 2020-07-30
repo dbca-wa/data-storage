@@ -3,6 +3,7 @@ import inspect
 import tempfile
 import logging
 import os
+import stat
 import socket
 import traceback
 
@@ -279,6 +280,17 @@ class Storage(object):
         """
         return [m for m in self._container_client.list_container(name_starts_with=folder)]
             
+    def create_dir(self,path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU):
+        """
+        Create path with access mode if it doesn't exist
+        """
+        pass
+
+    def chmod(self,path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU):
+        """
+        Change the path's access mode
+        """
+        pass
 
 class Resource(object):
     """
@@ -1223,6 +1235,7 @@ class ResourceRepositoryBase(object):
         else:
             self._resource_data_path = self.data_path
         self._storage = storage
+        self._storage.create_dir(self._resource_base_path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU)
 
     @property
     def resource_keys(self):
@@ -1766,6 +1779,14 @@ def get_resource_repository(storage,resource_name,resource_base_path=None,cache=
     return resource_class(storage,resource_name,cache=cache,**meta_metadata_json["kwargs"])
 
 
+class ResourceConsumeClientsMetadata(BasicResourceRepositoryMetadata):
+    def update_resource(self,resource_metadata):
+        metadata,created = super().update_resource(resource_metadata)
+        if created and len(metadata) == 1:
+            self._storage.chmod(self._resource_path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU)
+
+        return (metadata,created)
+
 class ResourceConsumeClients(ResourceRepositoryBase):
     """
     A client to track the non group resource consuming status of a client
@@ -1774,9 +1795,11 @@ class ResourceConsumeClients(ResourceRepositoryBase):
     data_path = "clients"
     def __init__(self,storage,resource_name,resource_base_path=None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
-        self._metadata_client = BasicResourceRepositoryMetadata(storage,resource_base_path=self._resource_base_path,cache=False,metaname="clients_metadata",archive=False)
+        self._metadata_client = ResourceConsumeClientsMetadata(storage,resource_base_path=self._resource_base_path,cache=False,metaname="clients_metadata",archive=False)
 
         self._resource_repository = get_resource_repository(storage,resource_name,resource_base_path=resource_base_path,cache=False)
+
+        self._storage.create_dir(self._resource_data_path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU)
 
     def get_client_metadatas(self,throw_exception=True,**kwargs):
         for m in self._metadata_client.resource_metadatas(throw_exception=throw_exception,**kwargs):

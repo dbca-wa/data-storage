@@ -1,5 +1,6 @@
 import logging
 import os
+import stat
 import shutil
 import traceback
 
@@ -41,6 +42,26 @@ class LocalStorage(Storage):
                 return f.read()
         else:
             raise exceptions.ResourceNotFound("Resource({}) Not Found".format(path))
+
+    def create_dir(self,path,mode=stat.S_IROTH|stat.S_IXOTH|stat.S_IRGRP|stat.S_IXGRP|stat.S_IRWXU):
+        """
+        Create path with access mode if it doesn't exist
+        """
+        abs_path = os.path.join(self._root_path,path)
+        if os.path.exists(abs_path):
+            if not os.path.isdir(abs_path):
+                raise Exception("The path({}) is not a folder".format(abs_path))
+        else:
+            os.makedirs(abs_path)
+            self.chmod(abs_path,mode=mode)
+
+    def chmod(self,path,mode=stat.S_IROTH|stat.S_IXOTH|stat.S_IRGRP|stat.S_IXGRP|stat.S_IRWXU):
+        """
+        Change the path's access mode
+        """
+        abs_path = os.path.join(self._root_path,path)
+        os.chmod(abs_path,mode)
+
 
     def delete(self,path):
         """
