@@ -45,7 +45,7 @@ class TestIndexedResourceRepository(TestResourceRepository):
         return IndexedResourceRepository(
             self.storage,
             self.resource_name,
-            lambda resource_group:resource_group[0:4],
+            "lambda resource_group:resource_group[0:4]",
             resource_base_path=self.resource_base_path,
             archive=self.archive,
             cache=self.cache,
@@ -84,7 +84,7 @@ class TestIndexedGroupResourceRepository(TestGroupResourceRepository):
         return IndexedGroupResourceRepository(
             self.storage,
             self.resource_name,
-            lambda resource_group:resource_group[0:4],
+            "lambda resource_group:resource_group[0:4]",
             resource_base_path=self.resource_base_path,
             archive=self.archive,
             cache=self.cache,

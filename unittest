@@ -6,3 +6,4 @@ cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.u
 #cd `dirname $0` && source venv/bin/activate && python -m unittest  data_storage.unittests.localstorage_repositoryclient_tester.TestResourceRepositoryClient ; deactivate
 
 #cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.unittests.localstorage_historydata_repository_tester ; deactivate
+#cd `dirname $0` && source venv/bin/activate && python -m unittest data_storage.unittests.localstorage_historydata_repository_tester data_storage.unittests.localstorage_historydata_repositoryclient_tester; deactivate

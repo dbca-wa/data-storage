@@ -9,8 +9,6 @@ import subprocess
 import base64
 import shutil
 import ast
-import dill
-import types
 import logging
 import traceback
 
@@ -34,14 +32,6 @@ class JSONEncoder(json.JSONEncoder):
                 "_type":"date",
                 "value":obj.strftime("%Y-%m-%d")
             }
-        elif obj.__class__.__name__ == 'function':
-            serialized_obj = {
-                "_type":"function",
-                "code":base64.b64encode(dill.dumps(obj.__code__)).decode()
-            }
-            if obj.__closure__:
-                serialized_obj["closure"] = base64.b64encode(dill.dumps(obj.__closure__)).decode()
-            return serialized_obj
         else:
             return json.JSONEncoder.default(self,obj)
 
@@ -62,12 +52,6 @@ class JSONDecoder(json.JSONDecoder):
             return timezone.nativetime(datetime.datetime.strptime(obj["value"],"%Y-%m-%d %H:%M:%S.%f").replace(tzinfo= self.TZ ))
         elif t == 'date':
             return datetime.datetime.strptime(obj["value"],"%Y-%m-%d").date()
-        elif t == 'function':
-            try:
-                return types.FunctionType(dill.loads(base64.b64decode(obj["code"])),{},closure=(dill.loads(base64.b64decode(obj["closure"])) if "closure" in obj else None))
-            except:
-                logger.error("Decode function object failed.{}".format(traceback.format_exc()))
-                return None
         else:
             return obj
 

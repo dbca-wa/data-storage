@@ -59,7 +59,7 @@ class TestIndexedHistoryDataRepository(TestHistoryDataRepository):
         return IndexedHistoryDataRepository(
             self.storage,
             self.resource_name,
-            lambda resource_id:resource_id.rsplit("/",1)[-1][0:4],
+            """lambda resource_id:resource_id.rsplit("/",1)[-1][0:4]""",
             resource_base_path=self.resource_base_path,
             cache=self.cache,
             f_earliest_metaname=self.f_earliest_id
@@ -110,7 +110,7 @@ class TestIndexedGroupHistoryDataRepository(TestGroupHistoryDataRepository):
         return IndexedGroupHistoryDataRepository(
             self.storage,
             self.resource_name,
-            lambda resource_group:resource_group[0:4],
+            "lambda resource_group:resource_group[0:4]",
             resource_base_path=self.resource_base_path,
             cache=self.cache,
             f_earliest_metaname=self.f_earliest_id

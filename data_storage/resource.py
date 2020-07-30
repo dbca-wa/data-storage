@@ -545,11 +545,12 @@ class IndexedResourceRepositoryMetadataMixin(MetadataIndex):
     A mixin class to manage indexed resource repository meta file 
     """
     metaclient_class = None
-    def __init__(self,storage,f_metaname,resource_base_path=None,cache=False,archive=False,index_metaname="_metadata_index",logical_delete=False):
+    def __init__(self,storage,f_metaname_code,resource_base_path=None,cache=False,archive=False,index_metaname="_metadata_index",logical_delete=False):
         super().__init__(storage,resource_base_path=resource_base_path,cache=cache,index_metaname=index_metaname,logical_delete=logical_delete)
         self._cache = cache
         self._archive = archive
-        self._f_metaname = f_metaname
+        self._f_metaname_code = f_metaname_code
+        exec("self._f_metaname={}".format(f_metaname_code))
         self._metadata_client = None
         self._current_metaname = None
 
@@ -1190,22 +1191,22 @@ class GroupHistoryDataRepositoryMetadata(ResourceRepositoryMetaMetadataMixin,Bas
 class IndexedResourceRepositoryMetadata(ResourceRepositoryMetaMetadataMixin,IndexedResourceRepositoryMetadataMixin):
     metaclient_class = BasicResourceRepositoryMetadata
     resource_keys = metaclient_class.resource_keys
-    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),("archive","_archive"),('f_metaname','_f_metaname'),("logical_delete","_logical_delete")]
+    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),("archive","_archive"),('f_metaname_code','_f_metaname_code'),("logical_delete","_logical_delete")]
 
 class IndexedGroupResourceRepositoryMetadata(ResourceRepositoryMetaMetadataMixin,IndexedResourceRepositoryMetadataMixin):
     metaclient_class = BasicGroupResourceRepositoryMetadata
     resource_keys = metaclient_class.resource_keys
-    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),("archive","_archive"),('f_metaname','_f_metaname'),("logical_delete","_logical_delete")]
+    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),("archive","_archive"),('f_metaname_code','_f_metaname_code'),("logical_delete","_logical_delete")]
 
 class IndexedHistoryDataRepositoryMetadata(ResourceRepositoryMetaMetadataMixin,IndexedHistoryDataRepositoryMetadataMixin):
     metaclient_class = BasicHistoryDataRepositoryMetadata
     resource_keys = metaclient_class.resource_keys
-    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),('f_metaname','_f_metaname')]
+    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),('f_metaname_code','_f_metaname_code')]
 
 class IndexedGroupHistoryDataRepositoryMetadata(ResourceRepositoryMetaMetadataMixin,IndexedHistoryDataRepositoryMetadataMixin):
     metaclient_class = BasicGroupHistoryDataRepositoryMetadata
     resource_keys = metaclient_class.resource_keys
-    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),('f_metaname','_f_metaname')]
+    meta_metadata_kwargs = [("resource_base_path","_resource_base_path"),("index_metaname","_metaname"),('f_metaname_code','_f_metaname_code')]
 
 class ResourceRepositoryBase(object):
     """
@@ -1720,25 +1721,25 @@ class GroupHistoryDataRepository(HistoryDataCleanMixin,HistoryDataRepositoryBase
         return (self._f_earliest_group(self.last_resource_id),None) if self._f_earliest_group else None
 
 class IndexedResourceRepository(ResourceRepositoryBase):
-    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,archive=False,index_metaname="_metadata_index",cache=True,logical_delete=False):
+    def __init__(self,storage,resource_name,f_metaname_code=None,resource_base_path=None,archive=False,index_metaname="_metadata_index",cache=True,logical_delete=False):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
-        self._metadata_client = IndexedResourceRepositoryMetadata(storage,f_metaname,resource_base_path=self._resource_base_path,cache=cache,archive=archive,index_metaname=index_metaname,logical_delete=logical_delete)
+        self._metadata_client = IndexedResourceRepositoryMetadata(storage,f_metaname_code,resource_base_path=self._resource_base_path,cache=cache,archive=archive,index_metaname=index_metaname,logical_delete=logical_delete)
 
 class IndexedGroupResourceRepository(ResourceRepositoryBase):
-    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,archive=False,index_metaname="_metadata_index",cache=True,logical_delete=False):
+    def __init__(self,storage,resource_name,f_metaname_code=None,resource_base_path=None,archive=False,index_metaname="_metadata_index",cache=True,logical_delete=False):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
-        self._metadata_client = IndexedGroupResourceRepositoryMetadata(storage,f_metaname,resource_base_path=self._resource_base_path,cache=cache,archive=archive,index_metaname=index_metaname,logical_delete=logical_delete)
+        self._metadata_client = IndexedGroupResourceRepositoryMetadata(storage,f_metaname_code,resource_base_path=self._resource_base_path,cache=cache,archive=archive,index_metaname=index_metaname,logical_delete=logical_delete)
 
 class IndexedHistoryDataRepository(IndexedHistoryDataCleanMixin,HistoryDataRepositoryBase):
-    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,index_metaname="_metadata_index",cache=True,f_earliest_metaname=None):
+    def __init__(self,storage,resource_name,f_metaname_code=None,resource_base_path=None,index_metaname="_metadata_index",cache=True,f_earliest_metaname=None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
-        self._metadata_client = IndexedHistoryDataRepositoryMetadata(storage,f_metaname,resource_base_path=self._resource_base_path,cache=cache,index_metaname=index_metaname)
+        self._metadata_client = IndexedHistoryDataRepositoryMetadata(storage,f_metaname_code,resource_base_path=self._resource_base_path,cache=cache,index_metaname=index_metaname)
         self._f_earliest_metaname = f_earliest_metaname
 
 class IndexedGroupHistoryDataRepository(IndexedHistoryDataCleanMixin,HistoryDataRepositoryBase):
-    def __init__(self,storage,resource_name,f_metaname,resource_base_path=None,index_metaname="_metadata_index",cache=True,f_earliest_metaname=None):
+    def __init__(self,storage,resource_name,f_metaname_code=None,resource_base_path=None,index_metaname="_metadata_index",cache=True,f_earliest_metaname=None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
-        self._metadata_client = IndexedGroupHistoryDataRepositoryMetadata(storage,f_metaname,resource_base_path=self._resource_base_path,cache=cache,index_metaname=index_metaname)
+        self._metadata_client = IndexedGroupHistoryDataRepositoryMetadata(storage,f_metaname_code,resource_base_path=self._resource_base_path,cache=cache,index_metaname=index_metaname)
         self._f_earliest_metaname = f_earliest_metaname
 
 
@@ -2499,7 +2500,7 @@ class HistoryDataConsumeClient(BasicConsumeClient):
         consume_result = ([],[])
 
         #find new and updated resources
-        metadata = self._resource_repository.metdata_client.json 
+        metadata = self._resource_repository.metadata_client.json 
         index = find_resource_index(metadata,self.last_consumed_resource_id,policy=GREATER)
         if index == -1:
             return consume_result
