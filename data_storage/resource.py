@@ -156,60 +156,6 @@ def find_resource_index(resource_datas,resource_id,policy=EQUAL):
     if max_index < 0:
         #empty resource datas
         return -1
-    else:
-        result = compare_resource_id(resource_id,resource_datas[min_index][0])
-        if result == -1:
-            #resource_id is less than the smallest data
-            if policy in (GREATER,GREATER_AND_EQUAL):
-                return min_index
-            else:
-                return -1
-        elif result == 0:
-            #resource_id is equal with the smallest data
-            if policy in (EQUAL,GREATER_AND_EQUAL,LESS_AND_EQUAL):
-                return min_index
-            elif policy == GREATER:
-                if max_index == min_index:
-                    return -1
-                else:
-                    return min_index + 1
-            else:
-                return -1
-        elif max_index == min_index:
-            #resource_id is greater than the smallest data , and resource datas only has one data
-            if policy in (EQUAL,GREATER_AND_EQUAL,GREATER):
-                return -1
-            else:
-                return min_index
-        else:
-            #resource_id is greater than the smallest data , and resource datas only has more than one data
-            result = compare_resource_id(resource_id,resource_datas[max_index][0])
-            if result == 1:
-                #resource_id is greater than the biggest data , and resource datas only has one data
-                if policy in (EQUAL,GREATER_AND_EQUAL,GREATER):
-                    return -1
-                else:
-                    return max_index
-            elif result == 0:
-                #resource_id is equal with the biggest data , and resource datas only has one data
-                if policy in (EQUAL,GREATER_AND_EQUAL,LESS_AND_EQUAL):
-                    return max_index
-                elif policy == GREATER:
-                    return -1
-                else:
-                    return max_index - 1
-            elif max_index == min_index + 1:
-                #resource_id is greater than the smallest data and less than the biggest data , and resource datas only has two datas
-                if policy == EQUAL:
-                    return -1
-                elif policy in (GREATER,GREATER_AND_EQUAL):
-                    return max_index
-                else:
-                    return max_index - 1
-                return -1
-            else:
-                min_index = min_index + 1
-                max_index = max_index - 1
 
     index = _find_index(resource_datas,min_index,max_index,resource_id,policy=policy)
     if index > max_index or index < min_index:
@@ -1933,7 +1879,7 @@ class BasicConsumeClient(ResourceConsumeClients):
             self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta)
         except Exception as ex:
             resource_status_name = self.get_consume_status_name(resource_status)
-            self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=str(ex))
+            self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=traceback.format_exc())
             msg = "Failed to consume the {} resource({}).{}".format(resource_status_name,resource_ids,traceback.format_exc())
             logger.error(msg)
             raise exceptions.ResourceConsumeFailed(msg)
@@ -2172,7 +2118,7 @@ class ResourceConsumeClient(BasicConsumeClient):
             for resource_ids in resources:
                 try:
                     if not isinstance(resource_ids,(list,tuple)):
-                        resource_ids = [resource_ids]
+                        resource_ids = (resource_ids,)
                     res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
                     res_meta = self._resource_repository.get_resource_metadata(*resource_ids,resource_status=ResourceConstant.ALL_RESOURCE,resource_file=None)
                     logically_deleted = res_meta.get(ResourceConstant.DELETED_KEY,False) if self._resource_repository.logical_delete else False
@@ -2394,7 +2340,7 @@ class HistoryDataConsumeClient(BasicConsumeClient):
         max_saved_consumed_resources: save all resources' consume status if it is None; or save up to max_save_consumed_resources' consume status by removing the oldest resouces' consume status
         """
         super().__init__(storage,resource_name,clientid,resource_base_path=resource_base_path)
-        self._max_saved_consumed_resources = max_saved_consumed_resources if max_saved_consumed_resources > 0 else None
+        self._max_saved_consumed_resources = max_saved_consumed_resources if max_saved_consumed_resources and max_saved_consumed_resources > 0 else None
 
     @property
     def last_consumed_resource_id(self):
@@ -2461,9 +2407,9 @@ class HistoryDataConsumeClient(BasicConsumeClient):
         if index == -1:
             #consume a new resource
             if len(self.resource_keys) == 1:
-                recent_resources_consume_status.append([args[0],consume_status])
+                recent_resources_consume_status.append([args[0],res_consume_status])
             else:
-                recent_resources_consume_status.append([args,consume_status])
+                recent_resources_consume_status.append([args,res_consume_status])
 
             if self._max_saved_consumed_resources and len(recent_resources_consume_status) > self._max_saved_consumed_resources:
                 recent_resources_consume_status = recent_resources_consume_status[-1 * self._max_saved_consumed_resources:]
@@ -2472,10 +2418,13 @@ class HistoryDataConsumeClient(BasicConsumeClient):
                 consume_status["first_consume_resource"] = args
                 consume_status["first_consume_time"] = timezone.now()
             consume_status["consumed_resources"] = consume_status.get("consumed_resources",0) + 1
-            
+        elif res_consume_status["resource_status"] == 'New':
+            recent_resources_consume_status[index][1] = res_consume_status
+
+
         else:
             #reconsume a existing resource 
-            raise exception.OperationNotSupporat("Can't reconsume a history data({})".format(args))
+            raise exceptions.OperationNotSupport("Can't reconsume a history data({})".format(args))
 
         return consume_status
 
@@ -2522,12 +2471,6 @@ class HistoryDataConsumeClient(BasicConsumeClient):
         resource_keys = self._resource_repository._metadata_client.resource_keys
         consume_result = ([],[])
 
-        #find new and updated resources
-        metadata = self._resource_repository.metadata_client.json 
-        index = find_resource_index(metadata,self.last_consumed_resource_id,policy=GREATER)
-        if index == -1:
-            return consume_result
-
         for resource_ids,res_meta in self._resource_repository.metadata_client.resources_in_range(self.last_consumed_resource_id,None,min_resource_included=False):
             res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
 
@@ -2542,6 +2485,11 @@ class HistoryDataConsumeClient(BasicConsumeClient):
                 #reosurce was consumed before
                 logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
                 raise exceptions.InvalidConsumeStatus("The resource({}), which is later than the last successfully consumed resource, was already consumed".format(resource_ids))
+
+            if len(resource_keys) == 1:
+                resource_ids = (resource_ids,)
+            else:
+                resource_ids = tuple(resource_ids)
             
             resource_status_name = self.get_consume_status_name(resource_status)
             try:

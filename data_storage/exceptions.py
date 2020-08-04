@@ -21,4 +21,6 @@ class InvalidConsumeStatus(Exception):
 class ResourceConsumeFailed(Exception):
     pass
 
+class ProcessIsRunning(Exception):
+    pass
 

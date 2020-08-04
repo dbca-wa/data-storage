@@ -7,7 +7,7 @@ import shutil
 import logging
 from collections import OrderedDict
 
-from data_storage import get_resource_repository,ResourceConstant,ResourceConsumeClient,ResourceConsumeClients
+from data_storage import get_resource_repository,ResourceConstant,ResourceConsumeClient,ResourceConsumeClients,HistoryDataConsumeClient
 from data_storage.utils import timezone,JSONEncoder,remove_file,remove_folder
 from data_storage import exceptions
 
@@ -1610,6 +1610,17 @@ class TestResourceRepositoryClientMixin(BaseClientTesterMixin):
 
 class TestHistoryDataRepositoryClientMixin(BaseClientTesterMixin):
     consume_parameters_test_cases = ((False,True,False),(True,True,False)) #negative test, stop_if_failed,batch
+
+    @property
+    def consume_client(self):
+        """
+        Return the client to consume resources from resource repository
+        """
+        if not hasattr(self,"_consume_client") or any(getattr(self._consume_client,prop) != value for prop,value in [
+            ("clientid",self.client_id)
+        ]):
+            self._consume_client = HistoryDataConsumeClient(self.storage,self.resource_name,self.client_id,resource_base_path=self.resource_base_path)
+        return self._consume_client
 
     def consume(self,callback,resources=None,reconsume=False,sortkey_func=None,stop_if_failed=True):
         return self.consume_client.consume(callback)
