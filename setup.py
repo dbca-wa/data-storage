@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='data-storage',
-    version='3.3.1',
+    version='3.4',
     packages=find_packages(),
     description='The client library for pushing resource to or fetching resource from storage',
     url='https://github.com/rockychen-dpaw/eventhub-client',
@@ -12,7 +12,6 @@ setup(
     zip_safe=False,
     install_requires=[
         'pytz',
-        'azure-storage-blob==12.3.1',
-        'dill==0.3.1.1'
+        'azure-storage-blob==12.3.1'
     ]
 )

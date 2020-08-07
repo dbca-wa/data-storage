@@ -24,3 +24,6 @@ class ResourceConsumeFailed(Exception):
 class ProcessIsRunning(Exception):
     pass
 
+class InvalidLockStatus(Exception):
+    pass
+

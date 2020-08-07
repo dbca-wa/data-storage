@@ -16,9 +16,14 @@ def nativetime(d=None):
     """
     Return the datetime with configured timezone, 
     if d is None, return current time with configured timezone
+    if d is not None and d.tzinfo is not None, return the datetime with configured timezone
+    if d is not None and d.tzinfo is None, set the datetime's timezone to configured timezone
     """
     if d:
-        return d.astimezone(settings.TZ)
+        if d.tzinfo:
+            return d.astimezone(settings.TZ)
+        else:
+            return d.replace(tzinfo=settings.TZ)
     else:
         return now()
 

@@ -143,6 +143,31 @@ def remove_folder(f):
 def file_size(f):
     return os.stat(f).st_size
 
+def file_mtime(f):
+    from . import timezone
+    return timezone.nativetime(datetime.datetime.fromtimestamp(os.path.getmtime(f)))
+
+def file_atime(f):
+    from . import timezone
+    return timezone.nativetime(datetime.datetime.fromtimestamp(os.path.getatime(f)))
+
+def set_file_mtime(f,d=None):
+    """
+    setting mtime will also set atime to the same time as mtime
+    return the new mtime
+    """
+    from . import timezone
+    if not d:
+        d = timezone.now()
+    else:
+        d = timezone.nativetime(d)
+
+    d = d.timestamp()
+
+    os.utime(f,times=(d,d))
+    return file_mtime(f)
+    
+
 def _get_simple_property(obj,prop_name):
     if isinstance(obj,(list,tuple)):
         try:
@@ -226,11 +251,16 @@ def get_property(obj,prop_name,convert_func=None,default=None,multi_properties=F
         else:
             return convert_func(val) if convert_func else val
 
-def acquire_runlock(lockfile):
+def acquire_runlock(lockfile,expired=None):
     """
+    expired: lock expire time in seconds
     register an exit hook to release the lock if a lock is acquired.
+    Return the time when the lock is acquired
     Throw exception if failed
     """
+    from . import timezone
+    if expired is not None and expired <= 0:
+        expired = None
 
     fd = None
     try:
@@ -247,8 +277,15 @@ def acquire_runlock(lockfile):
             #failed to attach a exit hook, release the lock and rethrow the exception
             release_runlock(lockfile)
             raise
+        return file_mtime(lockfile)
     except OSError as e:
         if e.errno == errno.EEXIST:
+            #lock is exist, check whether it is expired or not.
+            if expired and timezone.now() > file_mtime(lockfile) + datetime.timedelta(seconds=expired):
+                #lockfile is expired,remove the lock file
+                remove_file(lockfile)
+                return acquire_runlock(lockfile,expired=expired)
+
             metadata = None
             with open(lockfile,"r") as f:
                 metadata = f.read()
@@ -256,11 +293,11 @@ def acquire_runlock(lockfile):
                 try:
                     metadata = json.loads(metadata)
                 except:
-                    metadata = None
-            if metadata:
-                raise exceptions.ProcessIsRunning("The process is running now. {}".format(metadata))
+                    metadata = {}
             else:
-                raise exceptions.ProcessIsRunning("The process is running now")
+                metadata = {}
+            metadata["last_renew_time"] = file_mtime(lockfile)
+            raise exceptions.ProcessIsRunning("The process is running now. {}".format(metadata))
         else:
             raise
     finally:
@@ -269,8 +306,15 @@ def acquire_runlock(lockfile):
                 os.close(fd)
             except:
                 pass
+def renew_runlock(lockfile,previous_lock_renew_time):
+    """
+    previous_lock_renew_time: the time of the lock acquired or last renewed
+    Renew the lock to keep the lock not expire
+    """
+    if file_mtime(lockfile) != previous_lock_renew_time:
+        raise exceptions.InvalidLockStatus("The lock file's modify time was changed since last renew.")
 
-
+    return set_file_mtime(lockfile)
 
 def release_runlock(lockfile):
     """

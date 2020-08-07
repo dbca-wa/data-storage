@@ -26,6 +26,8 @@ log/
 # Environment settings
 .env
 
+.python-version
+
 
 # everything with local in it
 *local/
