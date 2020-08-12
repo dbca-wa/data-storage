@@ -1720,4 +1720,90 @@ class TestLocalStoragePermissionMixin(object):
         self.delete_all_clients()
         self.clean_resources()
 
+class TestRepositoryLockMixin(BaseTesterMixin):
+    def test_lock(self):
+        self.resource_repository.release_lock()
+
+        logger.info("{}Test consume lock function".format(self.prefix))
+        self.resource_repository.acquire_lock()
+        #acquiring the same lock should raise exception
+        with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+            self.resource_repository.acquire_lock()
+        #release the lock
+        self.resource_repository.release_lock()
+
+    
+        expired=4
+        #test expired lock
+        self.resource_repository.acquire_lock(expired=expired)
+        #acquiring the same lock should raise exception
+        with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+            self.resource_repository.acquire_lock(expired=expired)
+        time.sleep(expired + 1)
+        self.resource_repository.acquire_lock(expired=expired)
+        #release the lock
+        self.resource_repository.release_lock()
+
+        #test renew
+        exipred = 4
+        renew_time = self.resource_repository.acquire_lock(expired=expired)
+        #acquiring the same lock should raise exception
+        with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+            self.resource_repository.acquire_lock(expired=expired)
+        for i in range(0,3):
+            time.sleep(int(expired / 2))
+            renew_time = self.resource_repository.renew_lock(renew_time)
+            #acquiring the same lock should raise exception
+            with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+                self.resource_repository.acquire_lock(expired=expired)
+        time.sleep(expired + 1)
+        self.resource_repository.acquire_lock(expired=expired)
+        self.resource_repository.release_lock()
+
+
+class TestConsumeLockMixin(BaseClientTesterMixin):
+    def test_lock(self):
+        #clean the clients
+        self.delete_all_clients()
+        #check whether have no clients
+        self.check_no_clients()
+
+        self.consume_client.release_lock()
+
+        logger.info("{}Test consume lock function".format(self.prefix))
+        self.consume_client.acquire_lock()
+        #acquiring the same lock should raise exception
+        with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+            self.consume_client.acquire_lock()
+        #release the lock
+        self.consume_client.release_lock()
+
+    
+        expired=4
+        #test expired lock
+        self.consume_client.acquire_lock(expired=expired)
+        #acquiring the same lock should raise exception
+        with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+            self.consume_client.acquire_lock(expired=expired)
+        time.sleep(expired + 1)
+        self.consume_client.acquire_lock(expired=expired)
+        #release the lock
+        self.consume_client.release_lock()
+
+        #test renew
+        exipred = 4
+        renew_time = self.consume_client.acquire_lock(expired=expired)
+        #acquiring the same lock should raise exception
+        with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+            self.consume_client.acquire_lock(expired=expired)
+        for i in range(0,3):
+            time.sleep(int(expired / 2))
+            renew_time = self.consume_client.renew_lock(renew_time)
+            #acquiring the same lock should raise exception
+            with self.assertRaises(exceptions.AlreadyLocked,msg="Reacquiring a lock should throw AlreadyLocked exception"):
+                self.consume_client.acquire_lock(expired=expired)
+        time.sleep(expired + 1)
+        self.consume_client.acquire_lock(expired=expired)
+        self.consume_client.release_lock()
+
 

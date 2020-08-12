@@ -3,10 +3,14 @@ import os
 import stat
 import shutil
 import traceback
+import json
+import errno
+import socket
+import datetime
 
 from . import settings
 from . import exceptions
-from .utils import remove_file
+from .utils import remove_file,timezone,file_mtime,set_file_mtime,JSONEncoder,JSONDecoder
 
 from .resource import Storage
 
@@ -143,5 +147,69 @@ class LocalStorage(Storage):
 
         return [m for m in self._container_client.list_blobs(name_starts_with=path)]
             
+    def acquire_lock(self,path,expired=None):
+        """
+        expired: lock expire time in seconds
+        Acquire the exclusive lock, and return the time of the lock
+        Throw AlreadyLocked exception if can't obtain the lock
+        """
+        if expired is not None and expired <= 0:
+            expired = None
+    
+        fd = None
+        lockfile = os.path.join(self._root_path,path)
+        try:
+            fd = os.open(lockfile, os.O_CREAT|os.O_EXCL|os.O_RDWR)
+            os.write(fd,json.dumps({
+                "host": socket.getfqdn(),
+                "pid":os.getpid(),
+                "lock_time":timezone.now()
+            },cls=JSONEncoder).encode())
+            #lock is acquired
+            return file_mtime(lockfile)
+        except OSError as e:
+            if e.errno == errno.EEXIST:
+                #lock is exist, check whether it is expired or not.
+                if expired and timezone.now() > file_mtime(lockfile) + datetime.timedelta(seconds=expired):
+                    #lockfile is expired,remove the lock file
+                    remove_file(lockfile)
+                    return self.acquire_lock(path,expired=expired)
+    
+                metadata = None
+                with open(lockfile,"r") as f:
+                    metadata = f.read()
+                if metadata:
+                    try:
+                        metadata = json.loads(metadata,cls=JSONDecoder)
+                    except:
+                        metadata = {}
+                else:
+                    metadata = {}
+                raise exceptions.AlreadyLocked("Already Locked at {2} and renewed at {3} by process({1}) running in host({0})".format(metadata["host"],metadata["pid"],metadata["lock_time"],file_mtime(lockfile)))
+            else:
+                raise
+        finally:
+            if fd:
+                try:
+                    os.close(fd)
+                except:
+                    pass
 
+    def renew_lock(self,path,previous_renew_time):
+        """
+        Acquire the exclusive lock, and return the renew time
+        Throw InvalidLockStatus exception if the previous_renew_time is not matched.
+        """
+        lockfile = os.path.join(self._root_path,path)
+        if file_mtime(lockfile) != previous_renew_time:
+            raise exceptions.InvalidLockStatus("The lock's last renew time({}) is not equal with the provided last renew time({})".format(file_mtime(lockfile),previous_renew_time))
+
+        return set_file_mtime(lockfile)
+
+    def release_lock(self,path):
+        """
+        relase the lock
+        """
+        lockfile = os.path.join(self._root_path,path)
+        remove_file(lockfile)
 

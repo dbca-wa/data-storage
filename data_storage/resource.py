@@ -238,6 +238,28 @@ class Storage(object):
         """
         pass
 
+    def acquire_lock(self,path,expired=None):
+        """
+        expired: lock expire time in seconds
+        Acquire the exclusive lock, and return the time of the lock
+        Throw AlreadyLocked exception if can't obtain the lock
+        """
+        raise NotImplementedError("Method 'acquire_lock' is not implemented.")
+
+    def renew_lock(self,path,previous_renew_time):
+        """
+        Acquire the exclusive lock, and return the renew time
+        Throw InvalidLockStatus exception if the previous_renew_time is not matched.
+        """
+        raise NotImplementedError("Method 'acquire_lock' is not implemented.")
+
+    def release_lock(self,path):
+        """
+        relase the lock
+        """
+        raise NotImplementedError("Method 'release_lock' is not implemented.")
+
+
 class Resource(object):
     """
     manage a resource in storage.
@@ -1182,6 +1204,7 @@ class ResourceRepositoryBase(object):
             self._resource_data_path = self.data_path
         self._storage = storage
         self._storage.create_dir(self._resource_base_path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU)
+        self._lock_file = os.path.join(self._resource_base_path,"{}_archive_process.lock".format(self._resource_name))
 
     @property
     def resource_keys(self):
@@ -1206,6 +1229,16 @@ class ResourceRepositoryBase(object):
     @property
     def cache(self):
         return self._metadata_client._cache
+
+    def acquire_lock(self,expired=None):
+        return self._storage.acquire_lock(self._lock_file,expired=expired)
+
+    def renew_lock(self,previous_renew_time):
+        return self._storage.renew_lock(self._lock_file,previous_renew_time)
+
+    def release_lock(self):
+        self._storage.release_lock(self._lock_file)
+
 
     def _get_resource_file(self,resourceid):
         """
@@ -1773,7 +1806,6 @@ class ResourceConsumeClients(ResourceRepositoryBase):
         else:
             return None
 
-
 class BasicConsumeClient(ResourceConsumeClients):
     NOT_CHANGED = 0
     NEW = 1
@@ -1784,6 +1816,7 @@ class BasicConsumeClient(ResourceConsumeClients):
     def __init__(self,storage,resource_name,clientid,resource_base_path=None):
         super().__init__(storage,resource_name,resource_base_path=resource_base_path)
         self._clientid = clientid
+        self._lock_file = os.path.join(self._resource_base_path,"{}.lock".format(self._clientid))
 
     @property
     def consume_status(self):
@@ -1796,6 +1829,17 @@ class BasicConsumeClient(ResourceConsumeClients):
     @property
     def resource_keys(self):
         return self._resource_repository.resource_keys
+
+
+    def acquire_lock(self,expired=None):
+        return self._storage.acquire_lock(self._lock_file,expired=expired)
+
+    def renew_lock(self,previous_renew_time):
+        return self._storage.renew_lock(self._lock_file,previous_renew_time)
+
+    def release_lock(self):
+        self._storage.release_lock(self._lock_file)
+
 
     def get_consume_status_name(self,resource_status):
         if resource_status == self.PHYSICALLY_DELETED:

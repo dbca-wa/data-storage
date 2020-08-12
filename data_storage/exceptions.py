@@ -21,7 +21,7 @@ class InvalidConsumeStatus(Exception):
 class ResourceConsumeFailed(Exception):
     pass
 
-class ProcessIsRunning(Exception):
+class AlreadyLocked(Exception):
     pass
 
 class InvalidLockStatus(Exception):
