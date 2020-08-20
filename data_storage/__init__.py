@@ -7,3 +7,5 @@ from .resource import (ResourceConstant,get_resource_repository,
     ResourceConsumeClient,ResourceConsumeClients,HistoryDataConsumeClient)
 from .azure_blob import (AzureBlobStorage,)
 from .localstorage import (LocalStorage,)
+
+from . import transform

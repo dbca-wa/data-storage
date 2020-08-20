@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd `dirname $0` && python -m unittest data_storage.unittests.azure_repository_tester.TestResourceRepository data_storage.unittests.localstorage_repository_tester data_storage.unittests.localstorage_repositoryclient_tester data_storage.unittests.localstorage_historydata_repository_tester data_storage.unittests.localstorage_historydata_repositoryclient_tester data_storage.unittests.localstorage_lock_tester data_storage.unittests.azure_lock_tester data_storage.unittests.localstorage_consume_lock_tester data_storage.unittests.azure_consume_lock_tester
+cd `dirname $0` && python -m unittest data_storage.unittests.azure_repository_tester.TestResourceRepository data_storage.unittests.localstorage_repository_tester data_storage.unittests.localstorage_repositoryclient_tester data_storage.unittests.localstorage_historydata_repository_tester data_storage.unittests.localstorage_historydata_repositoryclient_tester data_storage.unittests.localstorage_lock_tester data_storage.unittests.azure_lock_tester data_storage.unittests.localstorage_consume_lock_tester data_storage.unittests.azure_consume_lock_tester data_storage.unittests.transform_tester
 
 #cd `dirname $0` && python -m unittest data_storage.unittests.localstorage_repository_tester data_storage.unittests.localstorage_repositoryclient_testey
 #cd `dirname $0` && python -m unittest  data_storage.unittests.localstorage_repositoryclient_tester.TestResourceRepositoryClient 
@@ -14,3 +14,4 @@ cd `dirname $0` && python -m unittest data_storage.unittests.azure_repository_te
 #cd `dirname $0` && python -m unittest data_storage.unittests.localstorage_repository_tester data_storage.unittests.localstorage_repositoryclient_tester data_storage.unittests.localstorage_historydata_repository_tester data_storage.unittests.localstorage_historydata_repositoryclient_tester
 
 #cd `dirname $0` && python -m unittest data_storage.unittests.localstorage_lock_tester
+#cd `dirname $0` && python -m unittest data_storage.unittests.transform_tester
