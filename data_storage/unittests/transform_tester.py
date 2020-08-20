@@ -15,6 +15,15 @@ from .basetester import BaseTesterMixin,TestHistoryDataRepositoryMixin
 
 logger = logging.getLogger(__name__)
 
+f_metaname_code="""
+def get_metaname(resource_group):
+    return resource_group[0:4]
+"""
+
+new_f_metaname_code="""
+def get_metaname(resource_group):
+    return resource_group
+"""
 class TestIndexedGroupHistoryDataRepository(BaseTesterMixin,unittest.TestCase):
     storage = LocalStorage(settings.LOCAL_STORAGE_ROOT_FOLDER)
     resource_base_path = "indexedgrouphistorydatarepository"
@@ -24,7 +33,7 @@ class TestIndexedGroupHistoryDataRepository(BaseTesterMixin,unittest.TestCase):
         return IndexedGroupHistoryDataRepository(
             self.storage,
             self.resource_name,
-            "lambda resource_group:resource_group[0:4]",
+            f_metaname_code,
             resource_base_path=self.resource_base_path,
             cache=self.cache,
             f_earliest_metaname=None
@@ -61,7 +70,7 @@ class TestIndexedGroupHistoryDataRepository(BaseTesterMixin,unittest.TestCase):
         metadatas = self.prepare_test_datas()
         
         res_metadatas = [res_metadata for res_metadata in repository.metadata_client.resource_metadatas(throw_exception=False,resource_status=ResourceConstant.ALL_RESOURCE,resource_file=None)]
-        new_repository_metadata = transform.change_metaindex(repository.metadata_client,"lambda resource_group:resource_group")
+        new_repository_metadata = transform.change_metaindex(repository.metadata_client,new_f_metaname_code)
         new_res_metadatas = [res_metadata for res_metadata in new_repository_metadata.resource_metadatas(throw_exception=False,resource_status=ResourceConstant.ALL_RESOURCE,resource_file=None)]
         
         self.assertEqual(res_metadatas,new_res_metadatas,"{}The migrated metadatas({}) is not equal with original metadatas({})".format(self.prefix,res_metadatas,new_res_metadatas))

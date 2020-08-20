@@ -6,6 +6,7 @@ import os
 import stat
 import socket
 import traceback
+import imp
 
 from . import settings
 from . import exceptions
@@ -529,10 +530,22 @@ class IndexedResourceRepositoryMetadataMixin(MetadataIndex):
         super().__init__(storage,resource_base_path=resource_base_path,cache=cache,index_metaname=index_metaname,logical_delete=logical_delete)
         self._cache = cache
         self._archive = archive
-        self._f_metaname_code = f_metaname_code
-        exec("self._f_metaname={}".format(f_metaname_code))
+        self._f_metaname_code = f_metaname_code.strip()
+        self._set_f_metaname()
         self._metadata_client = None
         self._current_metaname = None
+
+    def _set_f_metaname(self):
+        if self._f_metaname_code.startswith("lambda"):
+            exec("self._f_metaname={}".format(self._f_metaname_code))
+        else:
+            f_meta_module_name = "{}_{}".format(self.__class__.__name__,id(self))
+            f_meta_module = imp.new_module(f_meta_module_name)
+            exec(self._f_metaname_code,f_meta_module.__dict__)
+            if not hasattr(f_meta_module,"get_metaname"):
+                #method 'get_metaname' not found
+                raise Exception("The method 'get_metaname' is not found in source code({})".format(self._f_metaname_code))
+            self._f_metaname = getattr(f_meta_module,"get_metaname")
 
     def create_metadata_client(self,metaname):
         """
