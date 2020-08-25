@@ -1540,7 +1540,7 @@ class ResourceRepositoryBase(object):
         #push the resource to azure storage
         resource = self.get_resource(metadata["resource_path"])
         resource.upload(filename)
-        logger.debug("Push file  to the storage({}.{}).".format(filename,metadata["resource_id"],metadata["resource_path"]))
+        logger.debug("Push file({0})  to {2} in the resource repository({1}).".format(filename,self.resourcename,metadata["resource_path"]))
         #update the resource metadata
         if f_post_push:
             f_post_push(metadata)
