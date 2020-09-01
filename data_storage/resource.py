@@ -1793,6 +1793,10 @@ class ResourceConsumeClients(ResourceRepositoryBase):
 
         self._storage.create_dir(self._resource_data_path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU)
 
+    @property
+    def resource_repository(self):
+        return self._resource_repository
+
     def get_client_metadatas(self,throw_exception=True,**kwargs):
         for m in self._metadata_client.resource_metadatas(throw_exception=throw_exception,**kwargs):
             yield m
@@ -2418,6 +2422,33 @@ class HistoryDataConsumeClient(BasicConsumeClient):
             return recent_resources_consume_status[index][0]
 
         return None
+
+    @property
+    def last_consume(self):
+        """
+        Return (resource id,resource metadata,consume status)
+        """
+        consume_status = self.consume_status
+        if not consume_status:
+            return None
+
+        if self.RECENT_RESOURCES_CONSUME_STATUS_KEY not in consume_status:
+            return None
+
+        recent_resources_consume_status = consume_status[self.RECENT_RESOURCES_CONSUME_STATUS_KEY]
+
+        index = len(recent_resources_consume_status) - 1
+        while index >= 0:
+            if recent_resources_consume_status[index][1].get("consume_failed_msg"):
+                index -= 1
+                continue
+            if len(self.resource_keys) == 1:
+                return (recent_resources_consume_status[index][0],self.resource_repository.get_resource_metadata(recent_resources_consume_status[index][0]),recent_resources_consume_status[index][1])
+            else:
+                return (recent_resources_consume_status[index][0],self.resource_repository.get_resource_metadata(*recent_resources_consume_status[index][0]),recent_resources_consume_status[index][1])
+
+        return None
+
 
 
     def get_resource_consume_status(self,*args,consume_status=None):
