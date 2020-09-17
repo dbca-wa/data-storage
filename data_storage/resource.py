@@ -1938,6 +1938,12 @@ class BasicConsumeClient(ResourceConsumeClients):
         
             callback(resource_status,res_meta or res_consume_status["resource_metadata"],res_file)
             self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta)
+        except exceptions.StopConsuming as ex:
+            resource_status_name = self.get_consume_status_name(resource_status)
+            self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=str(ex))
+            msg = "Stop to consume the {} resource({}).{}".format(resource_status_name,resource_ids,str(ex))
+            logger.warning(msg)
+            raise ex
         except Exception as ex:
             resource_status_name = self.get_consume_status_name(resource_status)
             self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=traceback.format_exc())
@@ -2583,7 +2589,9 @@ class HistoryDataConsumeClient(BasicConsumeClient):
             try:
                 self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
                 consume_result[0].append((resource_status,resource_status_name,resource_ids))
-            except exceptions.ResourceConsumeFailed as ex:
+            except exceptions.StopConsuming as ex:
+                break
+            except Exception as ex:
                 consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
                 break
 

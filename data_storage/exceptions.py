@@ -27,3 +27,6 @@ class AlreadyLocked(Exception):
 class InvalidLockStatus(Exception):
     pass
 
+class StopConsuming(Exception):
+    pass
+
