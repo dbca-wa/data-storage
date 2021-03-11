@@ -1,21 +1,16 @@
 import datetime
-import hashlib
 import json
-import sys
-import imp
-import re
 import os
 import subprocess
-import base64
 import shutil
 import ast
 import logging
-import traceback
 
 from .classproperty import classproperty,cachedclassproperty
 from data_storage import exceptions
 
 logger = logging.getLogger(__name__)
+
 
 class JSONEncoder(json.JSONEncoder):
     """
@@ -36,6 +31,7 @@ class JSONEncoder(json.JSONEncoder):
         else:
             return json.JSONEncoder.default(self,obj)
 
+
 class JSONDecoder(json.JSONDecoder):
     """
     A JSON decoder to support decode datetime
@@ -55,6 +51,7 @@ class JSONDecoder(json.JSONDecoder):
             return datetime.datetime.strptime(obj["value"],"%Y-%m-%d").date()
         else:
             return obj
+
 
 def env(key, default=None, required=False,vtype=None):
     """
@@ -114,13 +111,15 @@ def env(key, default=None, required=False,vtype=None):
     else:
         raise Exception("'{0}' is a {1} environment variable, but {1} is not supported now".format(key,vtype))
 
+
 def file_md5(f):
     cmd = "md5sum {}".format(f)
     output = subprocess.check_output(cmd,shell=True)
     return output.split()[0].decode()
 
+
 def remove_file(f):
-    if not f: 
+    if not f:
         return
 
     try:
@@ -128,8 +127,9 @@ def remove_file(f):
     except:
         pass
 
+
 def remove_folder(f):
-    if not f: 
+    if not f:
         return
 
     try:
@@ -137,16 +137,20 @@ def remove_folder(f):
     except:
         pass
 
+
 def file_size(f):
     return os.stat(f).st_size
+
 
 def file_mtime(f):
     from . import timezone
     return timezone.nativetime(datetime.datetime.fromtimestamp(os.path.getmtime(f)))
 
+
 def file_atime(f):
     from . import timezone
     return timezone.nativetime(datetime.datetime.fromtimestamp(os.path.getatime(f)))
+
 
 def set_file_mtime(f,d=None):
     """
@@ -163,7 +167,7 @@ def set_file_mtime(f,d=None):
 
     os.utime(f,times=(d,d))
     return file_mtime(f)
-    
+
 
 def _get_simple_property(obj,prop_name):
     if isinstance(obj,(list,tuple)):
@@ -184,17 +188,17 @@ def _get_simple_property(obj,prop_name):
 def get_property(obj,prop_name,convert_func=None,default=None,multi_properties=False):
     """
     Get property value from object(dict object or normal object)
-    prop_name: 
-        a string for simple property 
+    prop_name:
+        a string for simple property
         tuple or "." separated string for nested property
         a list of (string or tuple or "." separated string) for alternative property
     multi_properties:only meaningful if prop_name is a list of properties;
         find the first non-None property if it is False;
         find the value of all the properties if it is True
-    convert_fuc: convert the data . 
+    convert_fuc: convert the data .
        it takes the property value as the only argument, if prop_name is a single property or is a list of properties but multi_properties is False
        it takes the list of values of the properties if prop_name is the list of properties and multi_properties if True
-    Return 
+    Return
         if value is None, return default value
         If convert_func is not None, return te result of the convert_func
         otherwise:
@@ -238,7 +242,7 @@ def get_property(obj,prop_name,convert_func=None,default=None,multi_properties=F
         if default is None:
             return convert_func(None) if convert_func else None
         else:
-            return default 
+            return default
     else:
         if callable(val):
             val = val()
@@ -247,4 +251,3 @@ def get_property(obj,prop_name,convert_func=None,default=None,multi_properties=F
             return convert_func(*val) if convert_func else val
         else:
             return convert_func(val) if convert_func else val
-
