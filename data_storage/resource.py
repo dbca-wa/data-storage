@@ -170,6 +170,7 @@ class ResourceConstant(object):
     ALL_RESOURCE = NORMAL_RESOURCE | DELETED_RESOURCE
 
     DELETED_KEY = "deleted"
+    DELETE_TIME_KEY = "delete_time"
 
 class Storage(object):
     """
@@ -906,6 +907,7 @@ class ResourceRepositoryMetadataBase(MetadataBase):
                     else:
                         #try to logically delete this resource
                         resource_metadata[ResourceConstant.DELETED_KEY] = True
+                        resource_metadata[ResourceConstant.DELETE_TIME_KEY] = timezone.now()
             else:
                 #logical delete is disabled, delete this resource permanently.
                 del p_metadata[args[-1]]
@@ -959,6 +961,7 @@ class ResourceRepositoryMetadataBase(MetadataBase):
         if ResourceConstant.DELETED_KEY in exist_metadata:
             #logically deleted before, restore it.
             del exist_metadata[ResourceConstant.DELETED_KEY]
+            del exist_metadata[ResourceConstant.DELETE_TIME_KEY]
 
         self.update(metadata)
         return (metadata,not existed)
