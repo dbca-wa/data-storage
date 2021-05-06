@@ -4,7 +4,7 @@ from . import exceptions
 from .resource import (ResourceConstant,get_resource_repository,
     GroupResourceRepository,IndexedResourceRepository,IndexedGroupResourceRepository,ResourceRepository,
     GroupHistoryDataRepository,IndexedHistoryDataRepository,IndexedGroupHistoryDataRepository,HistoryDataRepository,
-    ResourceConsumeClient,ResourceConsumeClients,HistoryDataConsumeClient)
+    ResourceConsumeClient,ResourceConsumeClients,HistoryDataConsumeClient,MetadataSession)
 from .azure_blob import (AzureBlobStorage,)
 from .localstorage import (LocalStorage,)
 

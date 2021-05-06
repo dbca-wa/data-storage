@@ -15,6 +15,48 @@ from .utils import JSONEncoder,JSONDecoder,timezone,remove_file,file_size
 
 logger = logging.getLogger(__name__)
 
+_metadatasession = None
+class MetadataSession(object):
+    def __init__(self):
+        self.tasks = {}
+
+    def update(self,resource,metadata):
+        if resource._resource_path in self.tasks:
+            if self.tasks[resource._resource_path][0] == "U":
+                self.tasks[resource._resource_path][2] = metadata
+            else:
+                self.tasks[resource._resource_path] = ["U",resource,metadata]
+        else:
+            self.tasks[resource._resource_path] = ["U",resource,metadata]
+
+    def delete(self,resource):
+        if resource._resource_path in self.tasks:
+            if self.tasks[resource._resource_path][0] == "D":
+                pass
+            else:
+                self.tasks[resource._resource_path] = ["D",resource]
+        else:
+            self.tasks[resource._resource_path] = ["D",resource]
+   
+    def __enter__(self):
+        global _metadatasession
+        if _metadatasession:
+            raise Exception("Metadata context was already created.")
+        _metadatasession = self
+        return self
+  
+    def __exit__(self,t, value, traceback):
+        global _metadatasession
+        for task in self.tasks.values():
+            if task[0] == "U":
+                logger.debug("Update metadata '{}' in blob storage".format(task[1]._resource_path))
+                JsonResource(task[1]._storage,task[1]._resource_path).update(task[2])
+            elif task[0] == "D":
+                logger.debug("Delete metadata '{}' from blob storage".format(task[1]._resource_path))
+                JsonResource(task[1]._storage,task[1]._resource_path).delete()
+
+        _metadatasession = None
+
 def compare_resource_id(resource_id1,resource_id2):
     """
     Compare two resource id
@@ -447,7 +489,11 @@ class MetadataBase(JsonResource):
             return
 
         logger.debug("Update the meta file '{}'".format(self._resource_path))
-        super().update(metadata)
+        if _metadatasession:
+            _metadatasession.update(self,metadata)
+        else:
+            logger.debug("Update metadata '{}' in blob storage".format(self._resource_path))
+            super().update(metadata)
         if self._cache:
             #cache the result
             self._json = metadata
@@ -457,7 +503,11 @@ class MetadataBase(JsonResource):
         Delete the metaata file
         """
         logger.debug("Delete the meta file '{}'".format(self._resource_path))
-        super().delete()
+        if _metadatasession:
+            _metadatasession.delete(self)
+        else:
+            logger.debug("Delete metadata '{}' from blob storage".format(self._resource_path))
+            super().delete()
         if self._cache:
             self._json = None
 
@@ -896,6 +946,11 @@ class ResourceRepositoryMetadataBase(MetadataBase):
                     if permanent_delete:
                         #try to permanently delete this resource
                         del p_metadata[args[-1]]
+                    elif ResourceConstant.DELETE_TIME_KEY not in resource_metadata:
+                        #try to logically delete this resource which is already logically deleted, but the delete time is not set.
+                        resource_metadata[ResourceConstant.DELETE_TIME_KEY] = timezone.now()
+                        self.update(metadata)
+                        return None
                     else:
                         #try to logically delete this resource, but it is already logically deleted
                         return None
