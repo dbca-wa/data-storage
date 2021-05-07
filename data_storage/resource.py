@@ -7,6 +7,8 @@ import stat
 import socket
 import traceback
 import imp
+import threading
+from datetime import timedelta
 
 from . import settings
 from . import exceptions
@@ -56,6 +58,56 @@ class MetadataSession(object):
                 JsonResource(task[1]._storage,task[1]._resource_path).delete()
 
         _metadatasession = None
+
+class LockSession(object):
+    lock_data = threading.local()
+    entry_times = 0
+    def __new__(cls,syncobj,expired,renew_interval=None):
+        if hasattr(cls.lock_data,'lock_session'):
+            return getattr(cls.lock_data,'lock_session')
+        else:
+            return super(LockSession,cls).__new__(cls)
+
+    def __init__(self,syncobj,expired,renew_interval=None):
+        if self.entry_times == 0:
+            self.syncobj = syncobj
+            self.expired = expired
+            self.renew_lock_time = None
+            self.renew_interval = timedelta(seconds=renew_interval) if renew_interval else None
+            self.entry_times = 1
+            logger.debug("Create a LockSession to synchronize the storage access")
+        else:
+            self.entry_times += 1
+            logger.debug("Reentry a LockSession to synchronize the storage access")
+
+
+    def renew(self):
+        self.renew_lock_time = self.syncobj.renew_lock(self.renew_lock_time)
+
+    def renew_if_needed(self):
+        if self.renew_interval and timezone.now() >= self.renew_lock_time + self.renew_interval:
+            self.renew()
+
+    def __enter__(self):
+        if self.entry_times == 1:
+            self.renew_lock_time = self.syncobj.acquire_lock(expired=self.expired)
+            setattr(self.lock_data,"lock_session",self)
+        else:
+            logger.debug("Lock has already been acquired for a reentry session,entry times = {}".format(self.entry_times))
+            pass
+        return self
+  
+    def __exit__(self,t, value, traceback):
+        if self.entry_times == 1:
+            delattr(self.lock_data,"lock_session")
+            self.syncobj.release_lock()
+            self.entry_times == 0
+            logger.debug("LockSession object was released")
+        else:
+            logger.debug("Reentry session, decrease entry times from {} to {}".format(self.entry_times,self.entry_times - 1))
+            self.entry_times -= 1
+            pass
+
 
 def compare_resource_id(resource_id1,resource_id2):
     """
@@ -1276,6 +1328,14 @@ class ResourceRepositoryBase(object):
         self._storage = storage
         self._storage.create_dir(self._resource_base_path,mode=stat.S_IRWXO|stat.S_IRWXG|stat.S_IRWXU)
         self._lock_file = os.path.join(self._resource_base_path,"{}_archive_process.lock".format(self._resource_name))
+
+    @property
+    def storage(self):
+        return self._storage
+
+    @property
+    def resource_data_path(self):
+        return self._resource_data_path
 
     @property
     def resource_keys(self):
