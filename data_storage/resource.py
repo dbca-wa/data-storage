@@ -2012,12 +2012,13 @@ class BasicConsumeClient(ResourceConsumeClients):
         return consume_status
 
 
-    def _update_client_consume_status(self,client_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,commit=True,failed_msg=None):
-        if resource_status in (self.PHYSICALLY_DELETED,self.LOGICALLY_DELETED):
+    def _update_client_consume_status(self,client_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=None):
+        if resource_status == self.PHYSICALLY_DELETED:
             if failed_msg:
                 res_consume_status = self._populate_resource_consume_status(res_consume_status,resource_status,res_meta,failed_msg)
             else:
                 self.remove_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+                res_consume_status["resource_status"] = "Physically Deleted"
 
         elif resource_status == self.NEW:
             res_consume_status = self._populate_resource_consume_status({},resource_status,res_meta,failed_msg)
@@ -2032,10 +2033,11 @@ class BasicConsumeClient(ResourceConsumeClients):
             client_metadata["last_consume_failed_msg"] = failed_msg
         elif "last_consume_failed_msg" in client_metadata:
             del client_metadata["last_consume_failed_msg"]
-        if commit:
-            self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=client_metadata)
+    
+    def push_client_consume_status(self,client_consume_status,client_metadata):
+        self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=client_metadata)
 
-    def _consume_resource(self,consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback):
+    def _consume_resource(self,client_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback):
         if resource_status == self.PHYSICALLY_DELETED:
             logger.info("Consume the physically deleted resource({},{})".format(resource_ids,(res_meta or res_consume_status["resource_metadata"])["resource_path"]))
         elif resource_status == self.LOGICALLY_DELETED:
@@ -2055,16 +2057,16 @@ class BasicConsumeClient(ResourceConsumeClients):
                 res_file = self._resource_repository.download_resource(*resource_ids,resource_status=ResourceConstant.ALL_RESOURCE)[1]
         
             callback(resource_status,res_meta or res_consume_status["resource_metadata"],res_file)
-            self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta)
+            self._update_client_consume_status(client_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta)
         except exceptions.StopConsuming as ex:
             resource_status_name = self.get_consume_status_name(resource_status)
-            self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=str(ex))
+            self._update_client_consume_status(client_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=str(ex))
             msg = "Stop to consume the {} resource({}).{}".format(resource_status_name,resource_ids,str(ex))
             logger.warning(msg)
             raise ex
         except Exception as ex:
             resource_status_name = self.get_consume_status_name(resource_status)
-            self._update_client_consume_status(consume_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=traceback.format_exc())
+            self._update_client_consume_status(client_metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,failed_msg=traceback.format_exc())
             msg = "Failed to consume the {} resource({}).{}".format(resource_status_name,resource_ids,traceback.format_exc())
             logger.error(msg)
             raise exceptions.ResourceConsumeFailed(msg)
@@ -2154,7 +2156,7 @@ class ResourceConsumeClient(BasicConsumeClient):
                     if self._resource_repository.archive:
                         res_meta = res_meta["current"]
                 except exceptions.ResourceNotFound as ex:
-                    if res_consume_status:
+                    if res_consume_status and (res_consume_status.get("resource_status") not in ("Logically Deleted","Physically Deleted") or res_consume_status.get("consume_failed_msg")):
                         #this resource was consuemd before and now it was deleted
                         logger.debug("Found a deleted resource({},{})".format(resource_ids,res_consume_status["resource_metadata"]["resource_path"]))
                         return True
@@ -2169,21 +2171,14 @@ class ResourceConsumeClient(BasicConsumeClient):
                         logger.debug("Found a new resource({},{})".format(resource_ids,res_meta["resource_path"]))
                         return True
                 elif logically_deleted:
-                    logger.debug("Found a deleted resource({},{})".format(resource_ids,res_meta["resource_path"]))
-                    return True
-                elif res_consume_status.get("consume_failed_msg"):
-                    if res_consume_status["resource_status"] == "New":
-                        logger.debug("Found a new resource({},{}) which is consumed failed last time".format(resource_ids,res_meta["resource_path"]))
-                        return True
-                    elif res_meta != res_consume_status["resource_metadata"]:
-                        logger.debug("Found a recently changed resource({},{}) which is consumed failed last time".format(resource_ids,res_meta["resource_path"]))
-                        return True
-                    elif res_consume_status["resouce_status"] == "Update":
-                        logger.debug("Found a updated resource({},{}) which is consumed failed last time".format(resource_ids,res_meta["resource_path"]))
-                        return True
+                    if res_consume_status.get("resource_status") == "Logically Deleted" and not res_consume_status.get("consume_failed_msg"):
+                        #already deleted in client
+                        continue
                     else:
-                        logger.debug("Found a  resource({},{}) which is reconsumed failed last time".format(resource_ids,res_meta["resource_path"]))
+                        logger.debug("Found a deleted resource({},{})".format(resource_ids,res_meta["resource_path"]))
                         return True
+                elif res_consume_status.get("consume_failed_msg"):
+                    return True
                 elif res_meta != res_consume_status["resource_metadata"]:
                     #resource was changed
                     logger.debug("Found a updated resource({},{})".format(resource_ids,res_meta["resource_path"]))
@@ -2210,21 +2205,14 @@ class ResourceConsumeClient(BasicConsumeClient):
                         logger.debug("Found a new resource({},{})".format(resource_ids,res_meta["resource_path"]))
                         return True
                 elif logically_deleted:
-                    logger.debug("Found a deleted resource({},{})".format(resource_ids,res_meta["resource_path"]))
-                    return True
-                elif res_consume_status.get("consume_failed_msg"):
-                    if res_consume_status["resource_status"] == "New":
-                        logger.debug("Found a new resource({},{}) which is consumed failed last time".format(resource_ids,res_meta["resource_path"]))
-                        return True
-                    elif res_meta != res_consume_status["resource_metadata"]:
-                        logger.debug("Found a recently changed resource({},{}) which is consumed failed last time".format(resource_ids,res_meta["resource_path"]))
-                        return True
-                    elif res_consume_status["resource_status"] == "Update":
-                        logger.debug("Found a updated resource({},{}) which is consumed failed last time".format(resource_ids,res_meta["resource_path"]))
-                        return True
+                    if res_consume_status.get("resource_status") == "Logically Deleted" and not res_consume_status.get("consume_failed_msg"):
+                        #already deleted in client
+                        continue
                     else:
-                        logger.debug("Found a  resource({},{}) which is reconsumed failed last time".format(resource_ids,res_meta["resource_path"]))
+                        logger.debug("Found a deleted resource({},{})".format(resource_ids,res_meta["resource_path"]))
                         return True
+                elif res_consume_status.get("consume_failed_msg"):
+                    return True
                 elif res_meta != res_consume_status["resource_metadata"]:
                     #resource was changed
                     logger.debug("Found a updated resource({},{})".format(resource_ids,res_meta["resource_path"]))
@@ -2242,6 +2230,9 @@ class ResourceConsumeClient(BasicConsumeClient):
                     resource_ids = tuple(val["resource_metadata"][key] for key in resource_keys)
                     if resource_ids in checked_resources:
                         continue
+                    elif val.get("resource_status") == "Logically Deleted" and not val.get("consume_failed_msg"):
+                        #already deleted in client
+                        continue
                     else:
                         logger.debug("Found a deleted resource({})".format(resource_ids))
                         return True
@@ -2252,6 +2243,9 @@ class ResourceConsumeClient(BasicConsumeClient):
                             resource_ids = tuple(val2["resource_metadata"][key] for key in resource_keys)
                             if resource_ids in checked_resources:
                                 continue
+                            elif val2.get("resource_status") == "Logically Deleted" and not val2.get("consume_failed_msg"):
+                                #already deleted in client
+                                continue
                             else:
                                 logger.debug("Found a deleted resource({})".format(resource_ids))
                                 return True
@@ -2261,6 +2255,9 @@ class ResourceConsumeClient(BasicConsumeClient):
                                 if level == len(resource_keys):
                                     resource_ids = tuple(val3["resource_metadata"][key] for key in resource_keys)
                                     if resource_ids in checked_resources:
+                                        continue
+                                    elif val3.get("resource_status") == "Logically Deleted" and not val3.get("consume_failed_msg"):
+                                        #already deleted in client
                                         continue
                                     else:
                                         logger.debug("Found a deleted resource({})".format(resource_ids))
@@ -2297,21 +2294,194 @@ class ResourceConsumeClient(BasicConsumeClient):
         resource_keys = self._resource_repository._metadata_client.resource_keys
         consume_result = ([],[])
         updated_resources = []
-
-        if resources and not callable(resources):
-            #Consume specified resources in order
-            for resource_ids in resources:
-                try:
-                    if not isinstance(resource_ids,(list,tuple)):
-                        resource_ids = (resource_ids,)
-                    res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-                    res_meta = self._resource_repository.get_resource_metadata(*resource_ids,resource_status=ResourceConstant.ALL_RESOURCE,resource_file=None)
+        try:
+            if resources and not callable(resources):
+                #Consume specified resources in order
+                for resource_ids in resources:
+                    try:
+                        if not isinstance(resource_ids,(list,tuple)):
+                            resource_ids = (resource_ids,)
+                        res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+                        res_meta = self._resource_repository.get_resource_metadata(*resource_ids,resource_status=ResourceConstant.ALL_RESOURCE,resource_file=None)
+                    except exceptions.ResourceNotFound as ex:
+                        if res_consume_status and (res_consume_status.get("resource_status") not in ("Logically Deleted","Physically Deleted") or res_consume_status.get("consume_failed_msg")):
+                            #this resource was consuemd before and now it was deleted
+                            if callback_per_resource and not sortkey_func:
+                                resource_status = self.PHYSICALLY_DELETED
+                                resource_status_name = self.get_consume_status_name(resource_status)
+                                try:
+                                    self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,None,callback)
+                                    consume_result[0].append((resource_status,resource_status_name,resource_ids))
+                                except exceptions.ResourceConsumeFailed as ex:
+                                    consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
+                                    if stop_if_failed:
+                                        return consume_result
+                            else:
+                                updated_resources.append((self.PHYSICALLY_DELETED,resource_ids,res_consume_status,None))
+                        else:
+                            #this resource was not conusmed and also it doesn't exist
+                            logger.warning("The resource({}) doesn't exist".format(resource_ids))
+                        continue
+    
                     logically_deleted = res_meta.get(ResourceConstant.DELETED_KEY,False) if self._resource_repository.logical_delete else False
                     if self._resource_repository.archive:
                         res_meta = res_meta["current"]
-                except exceptions.ResourceNotFound as ex:
-                    if res_consume_status:
-                        #this resource was consuemd before and now it was deleted
+                    if not res_consume_status:
+                        #new resource
+                        if not logically_deleted:
+                            resource_status = self.NEW
+                        else:
+                            self._update_client_consume_status(metadata,client_consume_status,self.LOGICALLY_DELETED,resource_ids,{},res_meta)
+                            continue
+                    elif logically_deleted:
+                        if res_consume_status.get("resource_status") == "Logically Deleted" and not res_consume_status.get("consume_failed_msg"):
+                            #already deleted in client
+                            continue
+                        else:
+                            resource_status = self.LOGICALLY_DELETED
+                    elif res_consume_status.get("consume_failed_msg"):
+                        if res_consume_status["resource_status"] == "New":
+                            resource_status = self.NEW
+                        elif res_consume_status["resource_status"] in ("Logically Deleted","Physically Deleted"):
+                            resource_status = self.NEW
+                        else:
+                            resource_status = self.UPDATED
+                    elif res_meta != res_consume_status["resource_metadata"]:
+                        #resource was changed
+                        resource_status = self.UPDATED
+                    elif reconsume:
+                        #resource was not changed
+                        resource_status = self.NOT_CHANGED
+                    else:
+                        #reosurce was consumed before
+                        logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
+                        continue
+        
+                    if callback_per_resource and not sortkey_func:
+                        resource_status_name = self.get_consume_status_name(resource_status)
+                        try:
+                            self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
+                            consume_result[0].append((resource_status,resource_status_name,resource_ids))
+                        except exceptions.ResourceConsumeFailed as ex:
+                            consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
+                            if stop_if_failed:
+                                return consume_result
+                    else:
+                        updated_resources.append((resource_status,resource_ids,res_consume_status,res_meta))
+    
+            else:
+                #find new and updated resources
+                checked_resources = set()
+                for res_meta in self._resource_repository.resource_metadatas(throw_exception=False,resource_status=ResourceConstant.ALL_RESOURCE,current_resource=False):
+                    logically_deleted = res_meta.get(ResourceConstant.DELETED_KEY,False) if self._resource_repository.logical_delete else False
+                    if self._resource_repository.archive:
+                        res_meta = res_meta["current"]
+    
+                    resource_ids = tuple(res_meta[key] for key in resource_keys)
+                    if resources and not resources(*resource_ids):
+                        continue
+                    checked_resources.add(resource_ids)
+                    res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+    
+                    if not res_consume_status:
+                        if not logically_deleted:
+                            #new resource
+                            resource_status = self.NEW
+                        else:
+                            self._update_client_consume_status(metadata,client_consume_status,self.LOGICALLY_DELETED,resource_ids,{},res_meta)
+                            continue
+                    elif logically_deleted:
+                        if res_consume_status.get("resource_status") == "Logically Deleted" and not res_consume_status.get("consume_failed_msg"):
+                            #already deleted in client
+                            continue
+                        else:
+                            resource_status = self.LOGICALLY_DELETED
+                    elif res_consume_status.get("consume_failed_msg"):
+                        if res_consume_status["resource_status"] == "New":
+                            resource_status = self.NEW
+                        elif res_consume_status["resource_status"] in ("Logically Deleted","Physically Deleted"):
+                            resource_status = self.NEW
+                        else:
+                            resource_status = self.UPDATED
+                    elif res_meta != res_consume_status["resource_metadata"]:
+                        #resource was changed
+                        resource_status = self.UPDATED
+                    elif reconsume:
+                        #resource was not changed
+                        resource_status = self.NOT_CHANGED
+                    else:
+                        #reosurce was consumed before
+                        logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
+                        continue
+                    
+                    if callback_per_resource and not sortkey_func:
+                        resource_status_name = self.get_consume_status_name(resource_status)
+                        try:
+                            self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
+                            consume_result[0].append((resource_status,resource_status_name,resource_ids))
+                        except exceptions.ResourceConsumeFailed as ex:
+                            consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
+                            if stop_if_failed:
+                                return consume_result
+                    else:
+                        updated_resources.append((resource_status,resource_ids,res_consume_status,res_meta))
+    
+                #find deleted resources
+                level = 1
+                deleted_resources = []
+                for val in client_consume_status.values():
+                    level = 1
+                    if level == len(resource_keys):
+                        resource_ids = tuple(val["resource_metadata"][key] for key in resource_keys)
+                        if resources and not resources(*resource_ids):
+                            continue
+                        elif resource_ids in checked_resources:
+                            continue
+                        elif val.get("resource_status") == "Logically Deleted" and not val.get("consume_failed_msg"):
+                            #already deleted in client
+                            self._update_client_consume_status(metadata,client_consume_status,self.PHYSICALLY_DELETED,resource_ids,val,None)
+                            continue
+                        else:
+                            deleted_resources.append(resource_ids)
+                    else:
+                        level += 1
+                        for val2 in val.values():
+                            if level == len(resource_keys):
+                                resource_ids = tuple(val2["resource_metadata"][key] for key in resource_keys)
+                                if resources and not resources(*resource_ids):
+                                    continue
+                                elif resource_ids in checked_resources:
+                                    continue
+                                elif val2.get("resource_status") == "Logically Deleted" and not val2.get("consume_failed_msg"):
+                                    #already deleted in client
+                                    self._update_client_consume_status(metadata,client_consume_status,self.PHYSICALLY_DELETED,resource_ids,val2,None)
+                                    continue
+                                else:
+                                    deleted_resources.append(resource_ids)
+                            else:
+                                level += 1
+                                for val3 in val2.values():
+                                    if level == len(resource_keys):
+                                        if val3.get("resource_status") == "Logically Deleted" and not val3.get("consume_failed_msg"):
+                                            #already deleted in client
+                                            continue
+                                        resource_ids = tuple(val3["resource_metadata"][key] for key in resource_keys)
+                                        if resources and not resources(*resource_ids):
+                                            continue
+                                        elif resource_ids in checked_resources:
+                                            continue
+                                        elif val3.get("resource_status") == "Logically Deleted" and not val3.get("consume_failed_msg"):
+                                            #already deleted in client
+                                            self._update_client_consume_status(metadata,client_consume_status,self.PHYSICALLY_DELETED,resource_ids,val3,None)
+                                            continue
+                                        else:
+                                            deleted_resources.append(resource_ids)
+                                    else:
+                                        raise Exception("Not implemented")
+                if deleted_resources:
+                    for resource_ids in deleted_resources:
+                        res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+    
                         if callback_per_resource and not sortkey_func:
                             resource_status = self.PHYSICALLY_DELETED
                             resource_status_name = self.get_consume_status_name(resource_status)
@@ -2324,196 +2494,46 @@ class ResourceConsumeClient(BasicConsumeClient):
                                     return consume_result
                         else:
                             updated_resources.append((self.PHYSICALLY_DELETED,resource_ids,res_consume_status,None))
-                    else:
-                        #this resource was not conusmed and also it doesn't exist
-                        logger.warning("The resource({}) doesn't exist".format(resource_ids))
-                    continue
-
-                if not res_consume_status:
-                    #new resource
-                    if not logically_deleted:
-                        resource_status = self.NEW
-                    else:
-                        continue
-                elif logically_deleted:
-                    resource_status = self.LOGICALLY_DELETED
-                elif res_consume_status.get("consume_failed_msg"):
-                    if res_consume_status["resource_status"] == "New":
-                        resource_status = self.NEW
-                    elif res_meta != res_consume_status["resource_metadata"]:
-                        resource_status = self.UPDATED
-                    elif res_consume_status["resource_status"] == "Update":
-                        resource_status = self.UPDATED
-                    else:
-                        resource_status = self.NOT_CHANGED
-                elif res_meta != res_consume_status["resource_metadata"]:
-                    #resource was changed
-                    resource_status = self.UPDATED
-                elif reconsume:
-                    #resource was not changed
-                    resource_status = self.NOT_CHANGED
-                else:
-                    #reosurce was consumed before
-                    logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
-                    continue
     
-                if callback_per_resource and not sortkey_func:
-                    resource_status_name = self.get_consume_status_name(resource_status)
-                    try:
-                        self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
-                        consume_result[0].append((resource_status,resource_status_name,resource_ids))
-                    except exceptions.ResourceConsumeFailed as ex:
-                        consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
-                        if stop_if_failed:
-                            return consume_result
-                else:
-                    updated_resources.append((resource_status,resource_ids,res_consume_status,res_meta))
-
-        else:
-            #find new and updated resources
-            checked_resources = set()
-            for res_meta in self._resource_repository.resource_metadatas(throw_exception=False,resource_status=ResourceConstant.ALL_RESOURCE,current_resource=False):
-                logically_deleted = res_meta.get(ResourceConstant.DELETED_KEY,False) if self._resource_repository.logical_delete else False
-                if self._resource_repository.archive:
-                    res_meta = res_meta["current"]
-
-                resource_ids = tuple(res_meta[key] for key in resource_keys)
-                if resources and not resources(*resource_ids):
-                    continue
-                checked_resources.add(resource_ids)
-                res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-
-                if not res_consume_status:
-                    if not logically_deleted:
-                        #new resource
-                        resource_status = self.NEW
-                    else:
-                        continue
-                elif logically_deleted:
-                    resource_status = self.LOGICALLY_DELETED
-                elif res_consume_status.get("consume_failed_msg"):
-                    if res_consume_status["resource_status"] == "New":
-                        resource_status = self.NEW
-                    elif res_meta != res_consume_status["resource_metadata"]:
-                        resource_status = self.UPDATED
-                    elif res_consume_status["resource_status"] == "Update":
-                        resource_status = self.UPDATED
-                    else:
-                        resource_status = self.NOT_CHANGED
-                elif res_meta != res_consume_status["resource_metadata"]:
-                    #resource was changed
-                    resource_status = self.UPDATED
-                elif reconsume:
-                    #resource was not changed
-                    resource_status = self.NOT_CHANGED
-                else:
-                    #reosurce was consumed before
-                    logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
-                    continue
-                
-                if callback_per_resource and not sortkey_func:
-                    resource_status_name = self.get_consume_status_name(resource_status)
-                    try:
-                        self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
-                        consume_result[0].append((resource_status,resource_status_name,resource_ids))
-                    except exceptions.ResourceConsumeFailed as ex:
-                        consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
-                        if stop_if_failed:
-                            return consume_result
-                else:
-                    updated_resources.append((resource_status,resource_ids,res_consume_status,res_meta))
-
-            #find deleted resources
-            level = 1
-            deleted_resources = []
-            for val in client_consume_status.values():
-                level = 1
-                if level == len(resource_keys):
-                    resource_ids = tuple(val["resource_metadata"][key] for key in resource_keys)
-                    if resources and not resources(*resource_ids):
-                        continue
-                    elif resource_ids in checked_resources:
-                        continue
-                    else:
-                        deleted_resources.append(resource_ids)
-                else:
-                    level += 1
-                    for val2 in val.values():
-                        if level == len(resource_keys):
-                            resource_ids = tuple(val2["resource_metadata"][key] for key in resource_keys)
-                            if resources and not resources(*resource_ids):
-                                continue
-                            elif resource_ids in checked_resources:
-                                continue
-                            else:
-                                deleted_resources.append(resource_ids)
-                        else:
-                            level += 1
-                            for val3 in val2.values():
-                                if level == len(resource_keys):
-                                    resource_ids = tuple(val3["resource_metadata"][key] for key in resource_keys)
-                                    if resources and not resources(*resource_ids):
-                                        continue
-                                    elif resource_ids in checked_resources:
-                                        continue
-                                    else:
-                                        deleted_resources.append(resource_ids)
-                                else:
-                                    raise Exception("Not implemented")
-            if deleted_resources:
-                for resource_ids in deleted_resources:
-                    res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-
-                    if callback_per_resource and not sortkey_func:
-                        resource_status = self.PHYSICALLY_DELETED
+            if updated_resources:
+                if sortkey_func:
+                    updated_resources.sort(key=sortkey_func)
+                if callback_per_resource :
+                    for updated_resource in updated_resources:
+                        resource_status,resource_ids,res_consume_status,res_meta = updated_resource
                         resource_status_name = self.get_consume_status_name(resource_status)
                         try:
-                            self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,None,callback)
+                            self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
                             consume_result[0].append((resource_status,resource_status_name,resource_ids))
                         except exceptions.ResourceConsumeFailed as ex:
                             consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
                             if stop_if_failed:
                                 return consume_result
-                    else:
-                        updated_resources.append((self.PHYSICALLY_DELETED,resource_ids,res_consume_status,None))
-
-        if updated_resources:
-            if sortkey_func:
-                updated_resources.sort(key=sortkey_func)
-            if callback_per_resource :
-                for updated_resource in updated_resources:
-                    resource_status,resource_ids,res_consume_status,res_meta = updated_resource
-                    resource_status_name = self.get_consume_status_name(resource_status)
+                else:
+                    callback_arguments = []
                     try:
-                        self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
-                        consume_result[0].append((resource_status,resource_status_name,resource_ids))
-                    except exceptions.ResourceConsumeFailed as ex:
-                        consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
-                        if stop_if_failed:
-                            return consume_result
-            else:
-                callback_arguments = []
-                try:
-                    #download files and populate callback arugments
-                    for updated_resource in updated_resources:
-                        consume_result[0].append((updated_resource[0],self.get_consume_status_name(updated_resource[0]),updated_resource[1]))
-                        if updated_resource[3]:
-                            res_file = self._resource_repository.download_resource(*updated_resource[1],resource_status=ResourceConstant.ALL_RESOURCE)[1]
-                        else:
-                            res_file = None
-                        callback_arguments.append((updated_resource[0],updated_resource[3] or updated_resource[2]["resource_metadata"],res_file))
+                        #download files and populate callback arugments
+                        for updated_resource in updated_resources:
+                            consume_result[0].append((updated_resource[0],self.get_consume_status_name(updated_resource[0]),updated_resource[1]))
+                            if updated_resource[3]:
+                                res_file = self._resource_repository.download_resource(*updated_resource[1],resource_status=ResourceConstant.ALL_RESOURCE)[1]
+                            else:
+                                res_file = None
+                            callback_arguments.append((updated_resource[0],updated_resource[3] or updated_resource[2]["resource_metadata"],res_file))
+    
+                        callback(callback_arguments)
+                        #update client consume status
+                        for updated_resource in updated_resources:
+                            self._update_client_consume_status(metadata,client_consume_status,*updated_resource)
+                    finally:
+                        #remote temporary files
+                        for res_status,res_meta,res_file in callback_arguments:
+                            remove_file(res_file)
+        finally:
+            #push client consume status to blob storage
+            self.push_client_consume_status(client_consume_status,metadata)
 
-                    callback(callback_arguments)
-                    #update client consume status
-                    for updated_resource in updated_resources:
-                        self._update_client_consume_status(metadata,client_consume_status,*updated_resource,commit=False)
-                    #push client consume status to blob storage
-                    self.push_resource(json.dumps(client_consume_status,cls=JSONEncoder,sort_keys=True,indent=4).encode(),metadata=metadata)
-                finally:
-                    #remote temporary files
-                    for res_status,res_meta,res_file in callback_arguments:
-                        remove_file(res_file)
-                
+                    
         return consume_result
 
 
@@ -2683,36 +2703,41 @@ class HistoryDataConsumeClient(BasicConsumeClient):
         resource_keys = self._resource_repository._metadata_client.resource_keys
         consume_result = ([],[])
 
-        for resource_ids,res_meta in self._resource_repository.metadata_client.resources_in_range(self.last_consumed_resource_id,None,min_resource_included=False):
-            res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
-
-            if not res_consume_status:
-                resource_status = self.NEW
-            elif res_consume_status.get("consume_failed_msg"):
-                if res_consume_status["resource_status"] == "New":
+        try:
+            for resource_ids,res_meta in self._resource_repository.metadata_client.resources_in_range(self.last_consumed_resource_id,None,min_resource_included=False):
+                res_consume_status = self.get_resource_consume_status(*resource_ids,consume_status=client_consume_status)
+    
+                if not res_consume_status:
                     resource_status = self.NEW
+                elif res_consume_status.get("consume_failed_msg"):
+                    if res_consume_status["resource_status"] == "New":
+                        resource_status = self.NEW
+                    else:
+                        raise exceptions.InvalidConsumeStatus("The resource({}), which is later than the last successfully consumed resource, was alread consumed.".format(resource_ids))
                 else:
-                    raise exceptions.InvalidConsumeStatus("The resource({}), which is later than the last successfully consumed resource, was alread consumed.".format(resource_ids))
-            else:
-                #reosurce was consumed before
-                logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
-                raise exceptions.InvalidConsumeStatus("The resource({}), which is later than the last successfully consumed resource, was already consumed".format(resource_ids))
+                    #reosurce was consumed before
+                    logger.debug("The resource({},{}) is not changed after last consuming".format(resource_ids,res_meta["resource_path"]))
+                    raise exceptions.InvalidConsumeStatus("The resource({}), which is later than the last successfully consumed resource, was already consumed".format(resource_ids))
+    
+                if len(resource_keys) == 1:
+                    resource_ids = (resource_ids,)
+                else:
+                    resource_ids = tuple(resource_ids)
+                
+                resource_status_name = self.get_consume_status_name(resource_status)
+                try:
+                    self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
+                    consume_result[0].append((resource_status,resource_status_name,resource_ids))
+                except exceptions.StopConsuming as ex:
+                    break
+                except Exception as ex:
+                    consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
+                    break
+        finally:
+            #push client consume status to blob storage
+            self.push_client_consume_status(client_consume_status,metadata)
 
-            if len(resource_keys) == 1:
-                resource_ids = (resource_ids,)
-            else:
-                resource_ids = tuple(resource_ids)
-            
-            resource_status_name = self.get_consume_status_name(resource_status)
-            try:
-                self._consume_resource(metadata,client_consume_status,resource_status,resource_ids,res_consume_status,res_meta,callback)
-                consume_result[0].append((resource_status,resource_status_name,resource_ids))
-            except exceptions.StopConsuming as ex:
-                break
-            except Exception as ex:
-                consume_result[1].append((resource_status,resource_status_name,resource_ids,str(ex)))
-                break
-
+    
         return consume_result
 
 
