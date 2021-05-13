@@ -2253,7 +2253,7 @@ class ResourceConsumeClient(BasicConsumeClient):
     
             #find deleted resources
             level = 1
-            for val in client_consume_status.values():
+            for val in client_consume_status[self.RESOURCES_CONSUME_STATUS_KEY].values():
                 level = 1
                 if level == len(resource_keys):
                     resource_ids = tuple(val["resource_metadata"][key] for key in resource_keys)
@@ -2469,7 +2469,7 @@ class ResourceConsumeClient(BasicConsumeClient):
                 #find deleted resources
                 level = 1
                 deleted_resources = []
-                for val in client_consume_status.values():
+                for val in client_consume_status[self.RESOURCES_CONSUME_STATUS_KEY].values():
                     level = 1
                     if level == len(resource_keys):
                         resource_ids = tuple(val["resource_metadata"][key] for key in resource_keys)
