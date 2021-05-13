@@ -1065,12 +1065,8 @@ class ResourceRepositoryMetadataBase(MetadataBase):
                     exist_metadata["histories"] = [exist_metadata["current"]]
             exist_metadata["current"] = resource_metadata
         else:
+            exist_metadata.clear()
             exist_metadata.update(resource_metadata)
-
-        if ResourceConstant.DELETED_KEY in exist_metadata:
-            #logically deleted before, restore it.
-            del exist_metadata[ResourceConstant.DELETED_KEY]
-            del exist_metadata[ResourceConstant.DELETE_TIME_KEY]
 
         self.update(metadata)
         return (metadata,not existed)
