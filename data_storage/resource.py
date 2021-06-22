@@ -2464,7 +2464,7 @@ class ResourceConsumeClient(BasicConsumeClient):
     
                 #find deleted resources
                 level = 1
-                deleted_resources = []
+                deleted_resources = [] #list of tuple(deleted resource id, already deleted in client?)
                 for val in client_consume_status[self.RESOURCES_CONSUME_STATUS_KEY].values():
                     level = 1
                     if level == len(resource_keys):
@@ -2475,10 +2475,9 @@ class ResourceConsumeClient(BasicConsumeClient):
                             continue
                         elif val.get("resource_status") == "Logically Deleted" and not val.get("consume_failed_msg"):
                             #already deleted in client
-                            self._update_client_consume_status(client_consume_status,self.PHYSICALLY_DELETED,resource_ids,val,None)
-                            continue
+                            deleted_resources.append((resource_ids,True))
                         else:
-                            deleted_resources.append(resource_ids)
+                            deleted_resources.append((resource_ids,False))
                     else:
                         level += 1
                         for val2 in val.values():
@@ -2490,10 +2489,9 @@ class ResourceConsumeClient(BasicConsumeClient):
                                     continue
                                 elif val2.get("resource_status") == "Logically Deleted" and not val2.get("consume_failed_msg"):
                                     #already deleted in client
-                                    self._update_client_consume_status(client_consume_status,self.PHYSICALLY_DELETED,resource_ids,val2,None)
-                                    continue
+                                    deleted_resources.append((resource_ids,True))
                                 else:
-                                    deleted_resources.append(resource_ids)
+                                    deleted_resources.append((resource_ids,False))
                             else:
                                 level += 1
                                 for val3 in val2.values():
@@ -2508,15 +2506,17 @@ class ResourceConsumeClient(BasicConsumeClient):
                                             continue
                                         elif val3.get("resource_status") == "Logically Deleted" and not val3.get("consume_failed_msg"):
                                             #already deleted in client
-                                            self._update_client_consume_status(client_consume_status,self.PHYSICALLY_DELETED,resource_ids,val3,None)
-                                            continue
+                                            deleted_resources.append((resource_ids,True))
                                         else:
-                                            deleted_resources.append(resource_ids)
+                                            deleted_resources.append((resource_ids,False))
                                     else:
                                         raise Exception("Not implemented")
                 if deleted_resources:
-                    for resource_ids in deleted_resources:
+                    for resource_ids,deleted in deleted_resources:
                         res_consume_status = self.get_resource_consume_status(client_consume_status,*resource_ids)
+                        if deleted:
+                            self._update_client_consume_status(client_consume_status,self.PHYSICALLY_DELETED,resource_ids,res_consume_status,None)
+                            continue
     
                         if callback_per_resource and not sortkey_func:
                             resource_status = self.PHYSICALLY_DELETED
