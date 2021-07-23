@@ -62,9 +62,15 @@ class MetadataSession(object):
 class LockSession(object):
     lock_data = threading.local()
     entry_times = 0
+
+    @classmethod
+    def get_session_key(cls,syncobj):
+        return "{}_{}_lock_session".format(syncobj.__class__.__name__,id(syncobj))
+
     def __new__(cls,syncobj,expired,renew_interval=None):
-        if hasattr(cls.lock_data,'lock_session'):
-            return getattr(cls.lock_data,'lock_session')
+        session_key = cls.get_session_key(syncobj)
+        if hasattr(cls.lock_data,session_key):
+            return getattr(cls.lock_data,session_key)
         else:
             return super(LockSession,cls).__new__(cls)
 
@@ -75,6 +81,8 @@ class LockSession(object):
             self.renew_lock_time = None
             self.renew_interval = timedelta(seconds=renew_interval) if renew_interval else None
             self.entry_times = 1
+            self.session_key = self.get_session_key(syncobj)
+            self.create()
             logger.debug("Create a LockSession to synchronize the storage access")
         else:
             self.entry_times += 1
@@ -88,25 +96,34 @@ class LockSession(object):
         if self.renew_interval and timezone.now() >= self.renew_lock_time + self.renew_interval:
             self.renew()
 
-    def __enter__(self):
-        if self.entry_times == 1:
-            self.renew_lock_time = self.syncobj.acquire_lock(expired=self.expired)
-            setattr(self.lock_data,"lock_session",self)
-        else:
-            logger.debug("Lock has already been acquired for a reentry session,entry times = {}".format(self.entry_times))
-            pass
-        return self
-  
-    def __exit__(self,t, value, traceback):
-        if self.entry_times == 1:
-            delattr(self.lock_data,"lock_session")
+    def release(self):
+        if self.entry_times <= 0:
+            logger.debug("LockSession object has been released")
+            return
+        elif self.entry_times == 1:
+            delattr(self.lock_data,self.session_key)
             self.syncobj.release_lock()
-            self.entry_times == 0
+            self.entry_times = 0
             logger.debug("LockSession object was released")
         else:
             logger.debug("Reentry session, decrease entry times from {} to {}".format(self.entry_times,self.entry_times - 1))
             self.entry_times -= 1
             pass
+
+    def create(self):
+        if self.entry_times == 1:
+            self.renew_lock_time = self.syncobj.acquire_lock(expired=self.expired)
+            setattr(self.lock_data,self.session_key,self)
+        else:
+            logger.debug("Lock has already been acquired for a reentry session,entry times = {}".format(self.entry_times))
+            pass
+        return self
+  
+    def __enter__(self):
+        pass
+
+    def __exit__(self,t, value, traceback):
+        self.release()
 
 
 def compare_resource_id(resource_id1,resource_id2):
