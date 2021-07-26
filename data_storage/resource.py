@@ -117,10 +117,9 @@ class LockSession(object):
         else:
             logger.debug("Lock has already been acquired for a reentry session,entry times = {}".format(self.entry_times))
             pass
-        return self
   
     def __enter__(self):
-        pass
+        return self
 
     def __exit__(self,t, value, traceback):
         self.release()
