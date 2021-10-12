@@ -1080,7 +1080,8 @@ class ResourceRepositoryMetadataBase(MetadataBase):
                 else:
                     exist_metadata["histories"] = [exist_metadata["current"]]
             exist_metadata["current"] = resource_metadata
-        else:
+        elif exist_metadata != resource_metadata:
+            #only update the resource metadata if resource_metadata is not equal with the exist metadata; otherwise if exist_metadata is the same as the resource_metadata, the updated metadata will be cleared.
             exist_metadata.clear()
             exist_metadata.update(resource_metadata)
 
