@@ -924,8 +924,9 @@ class ResourceRepositoryMetadataBase(MetadataBase):
             raise Exception("Unsupported keywords arguments({})".format(unknown_args))
 
         metadata = self.json or {}
+        #find the specified resurces, if not found, throw exception
         index = 0
-        while index < len(self.resource_keys):
+        while index < len(kwargs):
             key = self.resource_keys[index]
             if kwargs.get(key):
                 index += 1
@@ -2328,9 +2329,12 @@ class ResourceConsumeClient(BasicConsumeClient):
 
         client_consume_status = self.consume_status
         if self.RESOURCES_CONSUME_STATUS_KEY not in client_consume_status:
-            if client_consume_status:
+            if client_consume_status and "last_consume_host" not in client_consume_status:
                 #this is client consume status file with old format, convert to new format.
                 client_consume_status = {self.RESOURCES_CONSUME_STATUS_KEY:client_consume_status}
+            else:
+                client_consume_status = {self.RESOURCES_CONSUME_STATUS_KEY:{}}
+
 
         client_consume_status["last_consume_host"] = socket.getfqdn()
         client_consume_status["last_consume_pid"] = os.getpid()
